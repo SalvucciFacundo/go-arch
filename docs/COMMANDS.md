@@ -63,7 +63,17 @@ Validates the project's **Architectural Health**. This command is intended to be
 
 ---
 
-## 6. Metadata System (`.go-arch.yaml`) 📄
+## 6. `mcp` 🤖
+**Usage**: `go-arch mcp`
+
+Launches the Model Context Protocol (MCP) server over standard I/O (stdio).
+- **JSON-RPC 2.0**: Implements the MCP protocol for seamless integration with AI coding agents (such as OpenCode or Claude Desktop).
+- **Tool definitions**: Exposes the key capabilities (`new_project`, `generate_component`, `check_architecture`) directly as MCP tools with formal input schemas.
+- **Stderr Routing**: Automatically redirects standard UI logs to stderr to protect the integrity of the JSON-RPC stdout communication channel.
+
+---
+
+## 7. Metadata System (`.go-arch.yaml`) 📄
 
 The CLI is stateless, meaning it doesn't store your project data in a database. Instead, it uses this YAML file as the **Source of Truth**.
 - **Architecture Locking**: Prevents generating components that don't match the project's initial architecture.

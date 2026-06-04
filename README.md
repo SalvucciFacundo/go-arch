@@ -81,6 +81,12 @@ go-arch generate repository User
 go-arch generate crud Category # Complete CRUD implementation
 ```
 
+### 5. Model Context Protocol (MCP) Server
+Starts a native MCP server communicating over standard input/output (stdio), allowing coding agents (like OpenCode, Claude Desktop, or Gemini) to interact with the CLI tools.
+```bash
+go-arch mcp
+```
+
 ## 🏗️ Supported Architectures
 
 - **Minimalist**: Thin structure for microservices or single-file scripts.
