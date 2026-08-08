@@ -40,6 +40,9 @@ var newCmd = &cobra.Command{
 
 		ui.Success(fmt.Sprintf("Project '%s' created successfully!", config.ProjectName))
 		fmt.Printf("👉 %s cd %s and go-arch serve\n", ui.InfoMsg("Run:"), config.ProjectName)
+		if config.UseTemplHTMX {
+			ui.Info("Next steps: cd into your project, run `templ generate`, then `go run .` (Minimalist) or `go run ./cmd/api` (Standard/Hexagonal).")
+		}
 		return nil
 	},
 }
