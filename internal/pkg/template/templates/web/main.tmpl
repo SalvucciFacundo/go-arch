@@ -1,0 +1,53 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+
+	"{{ .ModuleName }}/internal/handler"
+	{{ if .UseObservability }}
+	"{{ .ModuleName }}/internal/telemetry"
+	{{ end }}
+	{{ if .UseGRPC }}
+	grpc_server "{{ .ModuleName }}/internal/adapters/grpc"
+	{{ end }}
+)
+
+func main() {
+	fmt.Println("🚀 {{ .ProjectName }} — templ + HTMX frontend")
+	{{ if .UseObservability }}
+
+	// Initialize Telemetry
+	shutdown, err := telemetry.InitTracer("{{ .ProjectName }}", "{{ .ObservabilityBackend }}")
+	if err != nil {
+		log.Fatalf("failed to initialize telemetry: %v", err)
+	}
+	defer shutdown(context.Background())
+	{{ end }}
+	{{ if .UseGRPC }}
+
+	// Initialize gRPC Server in a goroutine
+	go func() {
+		gs := grpc_server.NewServer()
+		if err := gs.Start(50051); err != nil {
+			log.Fatalf("failed to start gRPC server: %v", err)
+		}
+	}()
+	{{ end }}
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /", handler.PageHandler)
+	mux.HandleFunc("POST /counter", handler.CounterHandler)
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	fmt.Println("Listening on :8080")
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		log.Fatalf("server error: %v", err)
+	}
+	{{ if .UseGRPC }}
+	select {}
+	{{ end }}
+}

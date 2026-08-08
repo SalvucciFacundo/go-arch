@@ -62,10 +62,70 @@ func (s *Scaffolder) createFile(path string, templatePath string, data interface
 	return s.engine.Render(f, templatePath, data)
 }
 
+// createBinaryFile copies a file from the embedded templates FS to the target
+// path using ReadFile + WriteFile, bypassing engine.Render. This is deliberate:
+// binary assets and files containing template delimiters must not pass through
+// the text/template engine or the local/global override chain.
+func (s *Scaffolder) createBinaryFile(targetPath, embeddedPath string) error {
+	full := filepath.Join(s.config.ProjectName, targetPath)
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		return err
+	}
+	data, err := template.TemplatesFS.ReadFile("templates/" + embeddedPath)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(full, data, 0644)
+}
+
+// scaffoldWeb generates the templ + HTMX web scaffold: templ views, static
+// assets, handler, README, and the architecture-agnostic web main. Called from
+// createCommonFiles when UseTemplHTMX is true.
+func (s *Scaffolder) scaffoldWeb() error {
+	dirs := []string{
+		"views/layouts",
+		"views/pages",
+		"views/components",
+		"static/css",
+		"static/js",
+	}
+	for _, d := range dirs {
+		if err := os.MkdirAll(filepath.Join(s.config.ProjectName, d), 0755); err != nil {
+			return err
+		}
+	}
+
+	views := []struct{ target, tmpl string }{
+		{"views/layouts/base.templ", "web/base.templ.tmpl"},
+		{"views/pages/home.templ", "web/page.templ.tmpl"},
+		{"views/components/counter.templ", "web/component.templ.tmpl"},
+		{"static/css/style.css", "web/style.css.tmpl"},
+		{"internal/handler/page.go", "web/handler.tmpl"},
+		{"README.md", "web/readme.tmpl"},
+	}
+	for _, v := range views {
+		if err := s.createFile(v.target, v.tmpl, nil); err != nil {
+			return err
+		}
+	}
+
+	if err := s.createBinaryFile("static/js/htmx.min.js", "web/htmx.min.js"); err != nil {
+		return err
+	}
+
+	target := "cmd/api/main.go"
+	if s.config.Architecture == "Minimalist" {
+		target = "main.go"
+	}
+	return s.createFile(target, "web/main.tmpl", nil)
+}
+
 func (s *Scaffolder) scaffoldMinimalist() error {
 	// Only main.go and go.mod
-	if err := s.createFile("main.go", "minimalist/main.tmpl", nil); err != nil {
-		return err
+	if !s.config.UseTemplHTMX {
+		if err := s.createFile("main.go", "minimalist/main.tmpl", nil); err != nil {
+			return err
+		}
 	}
 	return s.createCommonFiles()
 }
@@ -83,8 +143,10 @@ func (s *Scaffolder) scaffoldStandard() error {
 		}
 	}
 
-	if err := s.createFile("cmd/api/main.go", "standard/main.tmpl", nil); err != nil {
-		return err
+	if !s.config.UseTemplHTMX {
+		if err := s.createFile("cmd/api/main.go", "standard/main.tmpl", nil); err != nil {
+			return err
+		}
 	}
 	return s.createCommonFiles()
 }
@@ -102,8 +164,10 @@ func (s *Scaffolder) scaffoldHexagonal() error {
 		}
 	}
 
-	if err := s.createFile("cmd/api/main.go", "hexagonal/main.tmpl", nil); err != nil {
-		return err
+	if !s.config.UseTemplHTMX {
+		if err := s.createFile("cmd/api/main.go", "hexagonal/main.tmpl", nil); err != nil {
+			return err
+		}
 	}
 	return s.createCommonFiles()
 }
@@ -153,6 +217,11 @@ func (s *Scaffolder) createCommonFiles() error {
 		if err := s.createFile("Makefile", "common/Makefile.tmpl", nil); err != nil {
 			return err
 		}
+	}
+
+	// templ + HTMX Frontend (Optional)
+	if s.config.UseTemplHTMX {
+		return s.scaffoldWeb()
 	}
 
 	return nil
