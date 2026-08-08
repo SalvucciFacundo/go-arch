@@ -1,13 +1,13 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
 
 	"{{ .ModuleName }}/internal/handler"
 	{{ if .UseObservability }}
+	"context"
 	"{{ .ModuleName }}/internal/telemetry"
 	{{ end }}
 	{{ if .UseGRPC }}

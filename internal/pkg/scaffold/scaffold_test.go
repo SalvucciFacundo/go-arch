@@ -549,6 +549,172 @@ func TestScaffolder_ConfigAndContentRoundTrip(t *testing.T) {
 	}
 }
 
+// TestHexagonalBuildFix_ON verifies task 4.7: a freshly scaffolded Hexagonal
+// project with UseTemplHTMX=true builds cleanly after templ generate.
+// If the `templ` binary is not in PATH, the test is skipped (as designed).
+func TestHexagonalBuildFix_ON(t *testing.T) {
+	if _, err := exec.LookPath("templ"); err != nil {
+		t.Skip("templ binary not installed — skipping ON build test (requires templ generate)")
+	}
+
+	tempDir, err := os.MkdirTemp("", "scaffold-hex-on-build-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tempDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "TestHexWeb",
+		ModuleName:   "github.com/test/hexweb",
+		Architecture: "Hexagonal",
+		UseTemplHTMX: true,
+	}
+
+	scaffolder := NewScaffolder(config)
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	projectDir := filepath.Join(tempDir, "TestHexWeb")
+	os.Chdir(projectDir)
+
+	// templ generate must run FIRST: creates Go source in views/ so those
+	// directories become valid Go packages. go mod tidy needs them to exist.
+	gen := exec.Command("templ", "generate")
+	if genOut, err := gen.CombinedOutput(); err != nil {
+		t.Fatalf("templ generate failed: %v\nOutput: %s", err, genOut)
+	}
+
+	// go mod tidy resolves the templ runtime dep (added by generated Go code)
+	tidy := exec.Command("go", "mod", "tidy")
+	if tidyOut, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy failed: %v\nOutput: %s", err, tidyOut)
+	}
+
+	// go build ./... must pass (hex + web combined build)
+	build := exec.Command("go", "build", "./...")
+	if buildOut, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed (hex+ON web build verification): %v\nOutput: %s", err, buildOut)
+	}
+}
+
+// TestHandlerFunctional verifies task 4.8: the generated handler/page.go
+// serves GET / (200 + counter markup) and POST /counter (200 + "1"/"2")
+// proving sync.Mutex-guarded state persists across invocations.
+// If the `templ` binary is not in PATH, the test is skipped.
+func TestHandlerFunctional(t *testing.T) {
+	if _, err := exec.LookPath("templ"); err != nil {
+		t.Skip("templ binary not installed — skipping handler functional test (requires templ generate)")
+	}
+
+	tempDir, err := os.MkdirTemp("", "scaffold-handler-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tempDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "TestHandler",
+		ModuleName:   "github.com/test/handlerapp",
+		Architecture: "Minimalist",
+		UseTemplHTMX: true,
+	}
+
+	scaffolder := NewScaffolder(config)
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	projectDir := filepath.Join(tempDir, "TestHandler")
+
+	// templ generate must run FIRST to create views/*/..._templ.go
+	gen := exec.Command("templ", "generate")
+	gen.Dir = projectDir
+	if genOut, err := gen.CombinedOutput(); err != nil {
+		t.Fatalf("templ generate failed: %v\nOutput: %s", err, genOut)
+	}
+
+	// go mod tidy resolves dependencies (templ runtime, etc.)
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = projectDir
+	if tidyOut, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy failed: %v\nOutput: %s", err, tidyOut)
+	}
+
+	// Write a test file in the generated project that exercises the handler
+	// using httptest (same process, no HTTP server needed).
+	testFile := filepath.Join(projectDir, "internal", "handler", "page_test.go")
+	testContent := `package handler
+
+import (
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// TestHandlerFunctional verifies the full handler contract in a single test
+// function so package-level counter state starts from 0.
+func TestHandlerFunctional(t *testing.T) {
+	// GET / → 200 + counter markup
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	PageHandler(w, r)
+	if w.Code != 200 {
+		t.Errorf("GET /: expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Count:") {
+		t.Errorf("GET /: expected body to contain 'Count:' counter markup, got: %s", body)
+	}
+
+	// First POST /counter → 200 + "Count: 1" (first increment from 0)
+	w1 := httptest.NewRecorder()
+	r1 := httptest.NewRequest("POST", "/counter", nil)
+	CounterHandler(w1, r1)
+	if w1.Code != 200 {
+		t.Errorf("POST /counter: expected 200, got %d", w1.Code)
+	}
+	body1 := w1.Body.String()
+	if !strings.Contains(body1, "Count: 1") {
+		t.Errorf("first POST /counter: expected body to contain 'Count: 1', got: %s", body1)
+	}
+
+	// Second POST /counter → 200 + "Count: 2" (state persists)
+	w2 := httptest.NewRecorder()
+	r2 := httptest.NewRequest("POST", "/counter", nil)
+	CounterHandler(w2, r2)
+	if w2.Code != 200 {
+		t.Errorf("second POST /counter: expected 200, got %d", w2.Code)
+	}
+	body2 := w2.Body.String()
+	if !strings.Contains(body2, "Count: 2") {
+		t.Errorf("second POST /counter: expected body to contain 'Count: 2', got: %s", body2)
+	}
+}
+`
+	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+		t.Fatalf("cannot write handler test file: %v", err)
+	}
+
+	// Run go test in the generated project's handler package
+	testCmd := exec.Command("go", "test", "-v", "./internal/handler/...")
+	testCmd.Dir = projectDir
+	testOut, err := testCmd.CombinedOutput()
+	outStr := string(testOut)
+	t.Logf("handler test output:\n%s", outStr)
+	if err != nil {
+		t.Fatalf("handler functional test failed: %v\nOutput: %s", err, outStr)
+	}
+}
+
 func TestScaffolder_CRUD(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "crud-integration-*")
 	if err != nil {
