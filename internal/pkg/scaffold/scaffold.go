@@ -43,7 +43,7 @@ func (s *Scaffolder) Execute() error {
 
 func (s *Scaffolder) createFile(path string, templatePath string, data interface{}) error {
 	fullPath := filepath.Join(s.config.ProjectName, path)
-	
+
 	// Crear directorios intermedios
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return err
@@ -82,7 +82,7 @@ func (s *Scaffolder) scaffoldStandard() error {
 			return err
 		}
 	}
-	
+
 	if err := s.createFile("cmd/api/main.go", "standard/main.tmpl", nil); err != nil {
 		return err
 	}
@@ -215,18 +215,18 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 	var files map[string]string
 	if s.config.Architecture == "Hexagonal" {
 		files = map[string]string{
-			filepath.Join("internal/domain", name+".go"):           "common/model.tmpl",
-			filepath.Join("internal/domain", name+"_service.go"):   "common/crud_service.tmpl",
-			filepath.Join("internal/ports", name+"_repository.go"): "common/crud_port.tmpl", // Port interface lives in internal/ports
+			filepath.Join("internal/domain", name+".go"):              "common/model.tmpl",
+			filepath.Join("internal/domain", name+"_service.go"):      "common/crud_service.tmpl",
+			filepath.Join("internal/ports", name+"_repository.go"):    "common/crud_port.tmpl", // Port interface lives in internal/ports
 			filepath.Join("internal/adapters", name+"_repository.go"): "common/crud_repository.tmpl",
 			filepath.Join("internal/adapters", name+"_handler.go"):    "common/crud_handler.tmpl",
 		}
 	} else {
 		files = map[string]string{
-			filepath.Join("internal/model", name+".go"):            "common/model.tmpl",
-			filepath.Join("internal/service", name+"_service.go"):  "common/crud_service.tmpl",
+			filepath.Join("internal/model", name+".go"):                 "common/model.tmpl",
+			filepath.Join("internal/service", name+"_service.go"):       "common/crud_service.tmpl",
 			filepath.Join("internal/repository", name+"_repository.go"): "common/crud_repository.tmpl",
-			filepath.Join("internal/handler", name+"_handler.go"):   "common/crud_handler.tmpl",
+			filepath.Join("internal/handler", name+"_handler.go"):       "common/crud_handler.tmpl",
 		}
 	}
 
