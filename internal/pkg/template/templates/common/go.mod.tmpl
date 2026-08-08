@@ -19,3 +19,9 @@ require (
 	google.golang.org/protobuf v1.33.0
 )
 {{ end }}
+
+{{ if .UseTemplHTMX }}
+require (
+	github.com/a-h/templ v0.3.906
+)
+{{ end }}

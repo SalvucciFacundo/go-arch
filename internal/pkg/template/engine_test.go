@@ -16,11 +16,13 @@ func TestEngine_Render(t *testing.T) {
 		ModuleName       string
 		UseObservability bool
 		UseGRPC          bool
+		UseTemplHTMX     bool
 	}{
 		ProjectName:      "TestApp",
 		ModuleName:       "github.com/test/app",
 		UseObservability: true,
 		UseGRPC:          true,
+		UseTemplHTMX:     false,
 	}
 
 	var buf bytes.Buffer
@@ -129,10 +131,12 @@ func TestEngine_Lookup(t *testing.T) {
 		ModuleName       string
 		UseObservability bool
 		UseGRPC          bool
+		UseTemplHTMX     bool
 	}{
 		ModuleName:       "github.com/test/custom",
 		UseObservability: false,
 		UseGRPC:          false,
+		UseTemplHTMX:     false,
 	}
 
 	var buf bytes.Buffer
