@@ -15,9 +15,14 @@ func init() {
 }
 
 var generateCmd = &cobra.Command{
-	Use:     "generate [type] [name]",
-	Short:   "Generate a new component",
-	Long:    `Generate components like service, repository, or handler based on the project layout.`,
+	Use:   "generate [type] [name]",
+	Short: "Generate a new component (service, repository, handler, crud, page, component)",
+	Long: `Generate components for the project.
+
+Backend types: service, repository, handler, crud.
+Web types (require use_templ_htmx: true in .go-arch.yaml):
+  page      → views/pages/<lowercase_name>.templ
+  component → views/components/<lowercase_name>.templ (a templ component)`,
 	Args:    cobra.ExactArgs(2),
 	Aliases: []string{"g"},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -40,6 +45,7 @@ var generateCmd = &cobra.Command{
 			Architecture: viper.GetString("architecture"),
 			DBDriver:     viper.GetString("db_driver"),
 			UseDocker:    viper.GetBool("use_docker"),
+			UseTemplHTMX: viper.GetBool("use_templ_htmx"),
 		}
 
 		ui.Info(fmt.Sprintf("Generating %s component: %s...", compType, name))
@@ -61,6 +67,15 @@ var generateCmd = &cobra.Command{
 		}
 
 		ui.Success(fmt.Sprintf("Component '%s' (%s) generated successfully.", name, compType))
+
+		if compType == "page" || compType == "component" {
+			fmt.Fprint(cmd.OutOrStdout(), templHint(compType)+"\n")
+		}
 		return nil
 	},
+}
+
+// templHint returns the post-success hint printed after page/component generation.
+func templHint(genType string) string {
+	return fmt.Sprintf("💡 Run `templ generate` to compile the new %s.", genType)
 }

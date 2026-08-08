@@ -4,8 +4,12 @@ import (
 	"fmt"
 	"go-arch/internal/pkg/template"
 	"go-arch/internal/ui"
+	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/samber/oops"
 )
 
 type Scaffolder struct {
@@ -241,6 +245,42 @@ func (s *Scaffolder) GenerateComponent(compType, name string) error {
 	}
 
 	switch compType {
+	case "page":
+		if !s.config.UseTemplHTMX {
+			return oops.Code("web_scaffold_required").
+				Hint("Set `use_templ_htmx: true` in .go-arch.yaml or re-run `go-arch new` with the flag").
+				Errorf("page generation requires the web scaffold")
+		}
+		if !isValidGoIdentifier(name) {
+			return oops.Code("invalid_component_name").
+				Hint("Name must be a valid Go identifier (e.g. Dashboard, UserCard)").
+				Errorf("invalid component name: %s", name)
+		}
+		targetPath = filepath.Join("views/pages", strings.ToLower(name)+".templ")
+		templatePath = "web/page_generated.tmpl"
+		if _, err := os.Stat(filepath.Join(s.config.ProjectName, targetPath)); err == nil {
+			return oops.Code("component_already_exists").
+				Hint("Choose a different name or delete the existing file").
+				Errorf("target file already exists: %s", targetPath)
+		}
+	case "component":
+		if !s.config.UseTemplHTMX {
+			return oops.Code("web_scaffold_required").
+				Hint("Set `use_templ_htmx: true` in .go-arch.yaml or re-run `go-arch new` with the flag").
+				Errorf("component generation requires the web scaffold")
+		}
+		if !isValidGoIdentifier(name) {
+			return oops.Code("invalid_component_name").
+				Hint("Name must be a valid Go identifier (e.g. Dashboard, UserCard)").
+				Errorf("invalid component name: %s", name)
+		}
+		targetPath = filepath.Join("views/components", strings.ToLower(name)+".templ")
+		templatePath = "web/component_generated.tmpl"
+		if _, err := os.Stat(filepath.Join(s.config.ProjectName, targetPath)); err == nil {
+			return oops.Code("component_already_exists").
+				Hint("Choose a different name or delete the existing file").
+				Errorf("target file already exists: %s", targetPath)
+		}
 	case "service":
 		templatePath = "common/service.tmpl"
 		if s.config.Architecture == "Hexagonal" {
@@ -308,4 +348,11 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 	fmt.Println("\n✅ CRUD generated successfully.")
 	fmt.Println("📍 Remember to register the routes in your main router.")
 	return nil
+}
+
+// isValidGoIdentifier returns true if name is a valid Go identifier.
+// Uses go/token.IsIdentifier which rejects keywords, empty strings,
+// strings with hyphens, and strings with leading digits.
+func isValidGoIdentifier(name string) bool {
+	return token.IsIdentifier(name)
 }
