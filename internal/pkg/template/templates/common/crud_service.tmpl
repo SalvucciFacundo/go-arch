@@ -3,8 +3,12 @@ package {{ if eq .Architecture "Hexagonal" }}domain{{ else }}service{{ end }}
 import (
 	"context"
 	"errors"
+	{{ if eq .Architecture "Hexagonal" }}
+	"{{ .ModuleName }}/internal/ports"
+	{{ end }}
 )
 
+{{ if ne .Architecture "Hexagonal" }}
 // {{ .EntityName }}Repository defines the persistence contract.
 type {{ .EntityName }}Repository interface {
 	Create(ctx context.Context, item *{{ .EntityName }}) error
@@ -13,13 +17,14 @@ type {{ .EntityName }}Repository interface {
 	Update(ctx context.Context, item *{{ .EntityName }}) error
 	Delete(ctx context.Context, id uint) error
 }
+{{ end }}
 
 // {{ .EntityName }}Service handles the business logic for {{ .EntityName }}.
 type {{ .EntityName }}Service struct {
-	repo {{ .EntityName }}Repository
+	{{ if eq .Architecture "Hexagonal" }}repo ports.{{ .EntityName }}Repository{{ else }}repo {{ .EntityName }}Repository{{ end }}
 }
 
-func New{{ .EntityName }}Service(repo {{ .EntityName }}Repository) *{{ .EntityName }}Service {
+func New{{ .EntityName }}Service(repo {{ if eq .Architecture "Hexagonal" }}ports.{{ .EntityName }}Repository{{ else }}{{ .EntityName }}Repository{{ end }}) *{{ .EntityName }}Service {
 	return &{{ .EntityName }}Service{repo: repo}
 }
 

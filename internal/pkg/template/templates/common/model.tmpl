@@ -1,4 +1,4 @@
-package domain
+package {{ if eq .Architecture "Hexagonal" }}domain{{ else }}model{{ end }}
 
 import (
 	"time"

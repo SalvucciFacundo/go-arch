@@ -1,0 +1,12 @@
+package ports
+
+import "context"
+
+// {{ .EntityName }}Repository defines the persistence contract.
+type {{ .EntityName }}Repository interface {
+	Create(ctx context.Context, item *{{ .EntityName }}) error
+	GetByID(ctx context.Context, id uint) (*{{ .EntityName }}, error)
+	List(ctx context.Context) ([]*{{ .EntityName }}, error)
+	Update(ctx context.Context, item *{{ .EntityName }}) error
+	Delete(ctx context.Context, id uint) error
+}

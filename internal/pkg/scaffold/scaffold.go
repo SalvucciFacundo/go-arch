@@ -217,7 +217,7 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 		files = map[string]string{
 			filepath.Join("internal/domain", name+".go"):           "common/model.tmpl",
 			filepath.Join("internal/domain", name+"_service.go"):   "common/crud_service.tmpl",
-			filepath.Join("internal/ports", name+"_repository.go"): "common/crud_service.tmpl", // Interface lives in service/domain
+			filepath.Join("internal/ports", name+"_repository.go"): "common/crud_port.tmpl", // Port interface lives in internal/ports
 			filepath.Join("internal/adapters", name+"_repository.go"): "common/crud_repository.tmpl",
 			filepath.Join("internal/adapters", name+"_handler.go"):    "common/crud_handler.tmpl",
 		}
