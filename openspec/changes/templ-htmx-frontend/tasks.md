@@ -55,10 +55,10 @@ Chain strategy: feature-branch-chain
 - [x] 4.4 htmx byte-identity: `bytes.Equal(TemplatesFS.ReadFile(...), os.ReadFile(target))`.
 - [x] 4.5 Config round-trip (`use_templ_htmx:` in `.go-arch.yaml`); templ require present/absent via render; README contains `templ generate` + BSD-2-Clause; counter.templ contains hx-post/hx-target/hx-swap.
 - [x] 4.6 Hex+OFF build: generated project `go mod tidy && go build ./...` exit 0.
-- [ ] 4.7 Hex+ON build: `go mod tidy && templ generate` (skip if binary absent) then `go build ./...` exit 0.
-- [ ] 4.8 Handler functional: httptest GET `/` → 200 + counter markup; POST `/counter` → 200 + "1"; second POST → "2" (mutex state persists).
+- [x] 4.7 Hex+ON build: `go mod tidy && templ generate` (skip if binary absent) then `go build ./...` exit 0.
+- [x] 4.8 Handler functional: httptest GET `/` → 200 + counter markup; POST `/counter` → 200 + "1"; second POST → "2" (mutex state persists).
 
 ## Phase 5: Verification
 
-- [ ] 5.1 `go test ./...` on go-arch repo — all green (existing + new).
-- [ ] 5.2 `go vet ./...` + `gofmt -l .` clean on changed files.
+- [x] 5.1 `go test ./...` on go-arch repo — all green (existing + new).
+- [x] 5.2 `go vet ./...` + `gofmt -l .` clean on changed files.
