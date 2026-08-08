@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/samber/oops"
 )
 
 func TestScaffolder_Layouts(t *testing.T) {
@@ -713,6 +715,351 @@ func TestHandlerFunctional(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler functional test failed: %v\nOutput: %s", err, outStr)
 	}
+}
+
+// ──────────────────────────────────────────────────────────
+// Phase 2 — page/component generation (Strict TDD)
+// ──────────────────────────────────────────────────────────
+
+// oopsCode extracts the oops code from an error, or returns "".
+func oopsCode(err error) string {
+	if oe, ok := oops.AsOops(err); ok {
+		code := oe.Code()
+		if s, ok := code.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// TestIsValidGoIdentifier verifies task 2.1: the helper rejects invalid names
+// and accepts valid CamelCase / lowercase Go identifiers.
+func TestIsValidGoIdentifier(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"CamelCase Dashboard", "Dashboard", true},
+		{"CamelCase UserCard", "UserCard", true},
+		{"lowercase dashboard", "dashboard", true},
+		{"hyphenated user-card", "user-card", false},
+		{"leading digit 123Name", "123Name", false},
+		{"empty string", "", false},
+		{"keyword if", "if", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValidGoIdentifier(tt.input)
+			if got != tt.want {
+				t.Errorf("isValidGoIdentifier(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGenerateComponent_Page verifies task 2.2: generating a page in a web
+// project produces the expected file with correct content.
+func TestGenerateComponent_Page(t *testing.T) {
+	tests := []struct {
+		name      string
+		inputName string
+		wantFile  string
+		wantFunc  string
+	}{
+		{"CamelCase Dashboard", "Dashboard", "views/pages/dashboard.templ", "templ Dashboard()"},
+		{"lowercase dashboard", "dashboard", "views/pages/dashboard.templ", "templ Dashboard()"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir, err := os.MkdirTemp("", "page-gen-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(tmpDir)
+
+			oldWd, _ := os.Getwd()
+			os.Chdir(tmpDir)
+			defer os.Chdir(oldWd)
+
+			config := &ui.ProjectConfig{
+				ProjectName:  ".",
+				ModuleName:   "github.com/test/pageapp",
+				Architecture: "Standard",
+				UseTemplHTMX: true,
+			}
+
+			scaffolder := NewScaffolder(config)
+			err = scaffolder.GenerateComponent("page", tt.inputName)
+			if err != nil {
+				t.Fatalf("GenerateComponent page %s failed: %v", tt.inputName, err)
+			}
+
+			fullPath := filepath.Join(tmpDir, tt.wantFile)
+			content, err := os.ReadFile(fullPath)
+			if err != nil {
+				t.Fatalf("expected file %s to exist: %v", tt.wantFile, err)
+			}
+
+			contentStr := string(content)
+			for _, want := range []string{"package pages", tt.wantFunc, "@layouts.Base(0)"} {
+				if !strings.Contains(contentStr, want) {
+					t.Errorf("expected %s to contain %q; got:\n%s", tt.wantFile, want, contentStr)
+				}
+			}
+		})
+	}
+}
+
+// TestGenerateComponent_Component verifies task 2.3: generating a component
+// in a web project produces the expected file with hx-* attributes.
+func TestGenerateComponent_Component(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "comp-gen-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/compapp",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.GenerateComponent("component", "UserCard")
+	if err != nil {
+		t.Fatalf("GenerateComponent component failed: %v", err)
+	}
+
+	wantFile := "views/components/usercard.templ"
+	fullPath := filepath.Join(tmpDir, wantFile)
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		t.Fatalf("expected file %s to exist: %v", wantFile, err)
+	}
+
+	contentStr := string(content)
+	for _, want := range []string{
+		"package components",
+		"templ UserCard()",
+		"hx-get=",
+	} {
+		if !strings.Contains(contentStr, want) {
+			t.Errorf("expected %s to contain %q; got:\n%s", wantFile, want, contentStr)
+		}
+	}
+}
+
+// TestGenerateComponent_Guards verifies task 2.4: gate, name validation, and
+// collision checks work correctly for page/component types.
+func TestGenerateComponent_Guards(t *testing.T) {
+	t.Run("flag off rejected", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "guard-off-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		oldWd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(oldWd)
+
+		config := &ui.ProjectConfig{
+			ProjectName:  ".",
+			ModuleName:   "github.com/test/guardoff",
+			Architecture: "Standard",
+			UseTemplHTMX: false,
+		}
+
+		scaffolder := NewScaffolder(config)
+		err = scaffolder.GenerateComponent("page", "Dashboard")
+		if err == nil {
+			t.Fatal("expected error when UseTemplHTMX is false, got nil")
+		}
+		if code := oopsCode(err); code != "web_scaffold_required" {
+			t.Errorf("expected oops code web_scaffold_required, got %q; err: %v", code, err)
+		}
+
+		targetFile := filepath.Join(tmpDir, "views", "pages", "dashboard.templ")
+		if _, statErr := os.Stat(targetFile); statErr == nil {
+			t.Errorf("expected no file written when gate rejects; found %s", targetFile)
+		}
+	})
+
+	t.Run("invalid name rejected", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "guard-name-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		oldWd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(oldWd)
+
+		config := &ui.ProjectConfig{
+			ProjectName:  ".",
+			ModuleName:   "github.com/test/guardname",
+			Architecture: "Standard",
+			UseTemplHTMX: true,
+		}
+
+		scaffolder := NewScaffolder(config)
+		err = scaffolder.GenerateComponent("component", "user-card")
+		if err == nil {
+			t.Fatal("expected error for invalid name, got nil")
+		}
+		if code := oopsCode(err); code != "invalid_component_name" {
+			t.Errorf("expected oops code invalid_component_name, got %q; err: %v", code, err)
+		}
+
+		targetFile := filepath.Join(tmpDir, "views", "components", "user-card.templ")
+		if _, statErr := os.Stat(targetFile); statErr == nil {
+			t.Errorf("expected no file written when name invalid; found %s", targetFile)
+		}
+	})
+
+	t.Run("collision rejected", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "guard-collision-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		oldWd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(oldWd)
+
+		// Pre-create the target directories + file
+		pagesDir := filepath.Join(tmpDir, "views", "pages")
+		if err := os.MkdirAll(pagesDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		existingContent := []byte("existing content")
+		targetFile := filepath.Join(pagesDir, "dashboard.templ")
+		if err := os.WriteFile(targetFile, existingContent, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		config := &ui.ProjectConfig{
+			ProjectName:  ".",
+			ModuleName:   "github.com/test/guardcollision",
+			Architecture: "Standard",
+			UseTemplHTMX: true,
+		}
+
+		scaffolder := NewScaffolder(config)
+		err = scaffolder.GenerateComponent("page", "Dashboard")
+		if err == nil {
+			t.Fatal("expected error for collision, got nil")
+		}
+		if code := oopsCode(err); code != "component_already_exists" {
+			t.Errorf("expected oops code component_already_exists, got %q; err: %v", code, err)
+		}
+
+		// Original file must be unchanged
+		contentAfter, err := os.ReadFile(targetFile)
+		if err != nil {
+			t.Fatalf("cannot re-read existing file: %v", err)
+		}
+		if !bytes.Equal(existingContent, contentAfter) {
+			t.Errorf("existing file was modified; want %q, got %q", existingContent, contentAfter)
+		}
+	})
+
+	t.Run("scaffold-shipped home.templ protected", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "guard-home-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		oldWd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(oldWd)
+
+		// Scaffold a full web project
+		config := &ui.ProjectConfig{
+			ProjectName:  "GuardHomeApp",
+			ModuleName:   "github.com/test/guardhome",
+			Architecture: "Standard",
+			UseTemplHTMX: true,
+		}
+
+		scaffolder := NewScaffolder(config)
+		if err := scaffolder.Execute(); err != nil {
+			t.Fatalf("Execute scaffold failed: %v", err)
+		}
+
+		projDir := filepath.Join(tmpDir, "GuardHomeApp")
+		os.Chdir(projDir)
+
+		homePath := "views/pages/home.templ"
+		originalContent, err := os.ReadFile(homePath)
+		if err != nil {
+			t.Fatalf("cannot read original home.templ: %v", err)
+		}
+
+		// Re-create scaffolder with "." since we chdir'd into the project
+		scaffolder2 := NewScaffolder(&ui.ProjectConfig{
+			ProjectName:  ".",
+			ModuleName:   "github.com/test/guardhome",
+			Architecture: "Standard",
+			UseTemplHTMX: true,
+		})
+		err = scaffolder2.GenerateComponent("page", "Home")
+		if err == nil {
+			t.Fatal("expected collision error for scaffold-shipped home.templ, got nil")
+		}
+		if code := oopsCode(err); code != "component_already_exists" {
+			t.Errorf("expected oops code component_already_exists, got %q; err: %v", code, err)
+		}
+
+		// Original home.templ must be byte-identical
+		contentAfter, err := os.ReadFile(homePath)
+		if err != nil {
+			t.Fatalf("cannot re-read home.templ: %v", err)
+		}
+		if !bytes.Equal(originalContent, contentAfter) {
+			t.Errorf("scaffold-shipped home.templ was modified! original: %d bytes, after: %d bytes",
+				len(originalContent), len(contentAfter))
+		}
+	})
+
+	t.Run("backend service unchanged", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "guard-backend-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		oldWd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(oldWd)
+
+		config := &ui.ProjectConfig{
+			ProjectName:  ".",
+			ModuleName:   "github.com/test/guardbackend",
+			Architecture: "Standard",
+			UseTemplHTMX: false,
+		}
+
+		scaffolder := NewScaffolder(config)
+		err = scaffolder.GenerateComponent("service", "Order")
+		if err != nil {
+			t.Fatalf("backend service generation should still work: %v", err)
+		}
+
+		if _, statErr := os.Stat(filepath.Join(tmpDir, "internal", "service", "Order_service.go")); statErr != nil {
+			t.Errorf("expected backend service file to be created: %v", statErr)
+		}
+	})
 }
 
 func TestScaffolder_CRUD(t *testing.T) {
