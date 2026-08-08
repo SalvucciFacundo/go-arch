@@ -1,0 +1,7 @@
+package components
+
+templ {{ title .EntityName }}() {
+	<div id="{{ lower .EntityName }}" hx-get="/{{ lower .EntityName }}" hx-target="#{{ lower .EntityName }}" hx-swap="innerHTML">
+		<p>{{ title .EntityName }} component</p>
+	</div>
+}
