@@ -110,7 +110,7 @@ func handleRequest(req *Request) {
 			"tools": []interface{}{
 				map[string]interface{}{
 					"name":        "new_project",
-					"description": "Initialize a new Go project with selected clean architecture layout and optional setups like database driver, Docker, Observability, and gRPC.",
+					"description": "Initialize a new Go project with selected clean architecture layout and optional setups like database driver, Docker, Observability, gRPC, and templ+HTMX frontend.",
 					"inputSchema": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
@@ -148,6 +148,10 @@ func handleRequest(req *Request) {
 							"useGRPC": map[string]interface{}{
 								"type":        "boolean",
 								"description": "Enable gRPC and Protocol Buffers support",
+							},
+							"useTemplHTMX": map[string]interface{}{
+								"type":        "boolean",
+								"description": "Generate a server-rendered templ + HTMX frontend (views, static assets, web-aware main)",
 							},
 						},
 						"required": []string{"projectName", "moduleName", "architecture"},
@@ -228,6 +232,7 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			UseObservability     bool   `json:"useObservability"`
 			ObservabilityBackend string `json:"observabilityBackend"`
 			UseGRPC              bool   `json:"useGRPC"`
+			UseTemplHTMX         bool   `json:"useTemplHTMX"`
 		}
 		if err := json.Unmarshal(arguments, &args); err != nil {
 			sendError(id, -32602, "Invalid tool arguments", err.Error())
@@ -247,6 +252,7 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			UseObservability:     args.UseObservability,
 			ObservabilityBackend: args.ObservabilityBackend,
 			UseGRPC:              args.UseGRPC,
+			UseTemplHTMX:         args.UseTemplHTMX,
 		}
 
 		scaffolder := scaffold.NewScaffolder(cfg)
