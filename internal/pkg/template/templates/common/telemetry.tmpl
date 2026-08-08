@@ -16,7 +16,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
-// InitTracer configura e inicializa el exportador de telemetría seleccionado.
+// InitTracer configures and initializes the selected telemetry exporter.
 func InitTracer(serviceName string, backend string) (func(context.Context) error, error) {
 	ctx := context.Background()
 
@@ -25,7 +25,7 @@ func InitTracer(serviceName string, backend string) (func(context.Context) error
 
 	switch backend {
 	case "Jaeger", "SigNoz":
-		// Jaeger y SigNoz aceptan OTLP sobre HTTP por defecto
+		// Jaeger and SigNoz accept OTLP over HTTP by default
 		// Para Jaeger: http://localhost:4318/v1/traces
 		// Para SigNoz: http://localhost:4318/v1/traces
 		exporter, err = otlptracehttp.New(ctx, 

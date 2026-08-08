@@ -18,7 +18,7 @@ var setupCmd = &cobra.Command{
 	Short: "Setup Go environment",
 	Long:  `The 'setup' command detects your OS and installs Go and necessary tools like 'air'.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ui.Info(fmt.Sprintf("Detectando entorno para %s/%s...", runtime.GOOS, runtime.GOARCH))
+		ui.Info(fmt.Sprintf("Detecting environment for %s/%s...", runtime.GOOS, runtime.GOARCH))
 
 		switch runtime.GOOS {
 		case "linux":
@@ -29,28 +29,28 @@ var setupCmd = &cobra.Command{
 			return oops.
 				Code("os_not_supported").
 				With("os", runtime.GOOS).
-				Errorf("Sistema operativo no soportado automáticamente aún")
+				Errorf("Operating system not yet supported automatically")
 		}
 
-		ui.Success("Proceso de setup finalizado. Revisa las instrucciones arriba para completar la instalación.")
+		ui.Success("Setup process finished. Review the instructions above to complete the installation.")
 		return nil
 	},
 }
 
 func setupLinux() {
-	ui.Info("🐧 Entorno Linux detectado.")
-	fmt.Println("1. Descargando instalador oficial de go.dev...")
-	// TODO: Implementar descarga real con net/http
-	fmt.Println("2. Para instalar, ejecutá: sudo tar -C /usr/local -xzf go1.24.linux-amd64.tar.gz")
-	fmt.Println("3. Instalando Air para hot-reload...")
-	fmt.Printf("👉 %s go install github.com/air-verse/air@latest\n", ui.InfoMsg("Ejecutá:"))
+	ui.Info("🐧 Linux environment detected.")
+	fmt.Println("1. Downloading official go.dev installer...")
+	// TODO: Implement actual download with net/http
+	fmt.Println("2. To install, run: sudo tar -C /usr/local -xzf go1.24.linux-amd64.tar.gz")
+	fmt.Println("3. Installing Air for hot-reload...")
+	fmt.Printf("👉 %s go install github.com/air-verse/air@latest\n", ui.InfoMsg("Run:"))
 }
 
 func setupWindows() {
-	ui.Info("🪟 Entorno Windows detectado.")
-	fmt.Println("1. Descargando MSI oficial de go.dev...")
-	// TODO: Implementar descarga real
-	fmt.Println("2. Ejecutando instalador...")
-	fmt.Println("3. Instalando Air para hot-reload...")
-	fmt.Printf("👉 %s go install github.com/air-verse/air@latest\n", ui.InfoMsg("Ejecutá:"))
+	ui.Info("🪟 Windows environment detected.")
+	fmt.Println("1. Downloading official MSI from go.dev...")
+	// TODO: Implement actual download
+	fmt.Println("2. Running installer...")
+	fmt.Println("3. Installing Air for hot-reload...")
+	fmt.Printf("👉 %s go install github.com/air-verse/air@latest\n", ui.InfoMsg("Run:"))
 }

@@ -21,14 +21,14 @@ func NewScaffolder(config *ui.ProjectConfig) *Scaffolder {
 }
 
 func (s *Scaffolder) Execute() error {
-	fmt.Printf("🏗️ Creando proyecto '%s' con arquitectura %s...\n", s.config.ProjectName, s.config.Architecture)
+	fmt.Printf("🏗️ Creating project '%s' with %s architecture...\n", s.config.ProjectName, s.config.Architecture)
 
-	// 1. Crear directorio base
+	// 1. Create base directory
 	if err := os.MkdirAll(s.config.ProjectName, 0755); err != nil {
 		return err
 	}
 
-	// 2. Generar estructura según el layout
+	// 2. Generate structure according to the layout
 	switch s.config.Architecture {
 	case "Minimalist":
 		return s.scaffoldMinimalist()
@@ -37,7 +37,7 @@ func (s *Scaffolder) Execute() error {
 	case "Hexagonal":
 		return s.scaffoldHexagonal()
 	default:
-		return fmt.Errorf("arquitectura no soportada: %s", s.config.Architecture)
+		return fmt.Errorf("unsupported architecture: %s", s.config.Architecture)
 	}
 }
 
@@ -63,7 +63,7 @@ func (s *Scaffolder) createFile(path string, templatePath string, data interface
 }
 
 func (s *Scaffolder) scaffoldMinimalist() error {
-	// Solo main.go y go.mod
+	// Only main.go and go.mod
 	if err := s.createFile("main.go", "minimalist/main.tmpl", nil); err != nil {
 		return err
 	}
@@ -117,12 +117,12 @@ func (s *Scaffolder) createCommonFiles() error {
 		return err
 	}
 
-	// .env (Siempre útil)
+	// .env (Always useful)
 	if err := s.createFile(".env", "common/env.tmpl", nil); err != nil {
 		return err
 	}
 
-	// Docker Files (Opcionales)
+	// Docker Files (Optional)
 	if s.config.UseDocker {
 		if err := s.createFile("Dockerfile", "common/Dockerfile.tmpl", nil); err != nil {
 			return err
@@ -132,7 +132,7 @@ func (s *Scaffolder) createCommonFiles() error {
 		}
 	}
 
-	// Observabilidad (Opcional)
+	// Observability (Optional)
 	if s.config.UseObservability {
 		if err := s.createFile("internal/telemetry/telemetry.go", "common/telemetry.tmpl", nil); err != nil {
 			return err
@@ -142,7 +142,7 @@ func (s *Scaffolder) createCommonFiles() error {
 		}
 	}
 
-	// gRPC / Microservicios (Opcional)
+	// gRPC / Microservices (Optional)
 	if s.config.UseGRPC {
 		if err := s.createFile("api/proto/service.proto", "common/service.proto.tmpl", nil); err != nil {
 			return err
@@ -158,7 +158,7 @@ func (s *Scaffolder) createCommonFiles() error {
 	return nil
 }
 
-// GenerateComponent genera un componente específico (service, repository, handler)
+// GenerateComponent generates a specific component (service, repository, handler)
 func (s *Scaffolder) GenerateComponent(compType, name string) error {
 	var targetPath string
 	var templatePath string
@@ -194,13 +194,13 @@ func (s *Scaffolder) GenerateComponent(compType, name string) error {
 			targetPath = filepath.Join("internal/handler", name+"_handler.go")
 		}
 	default:
-		return fmt.Errorf("tipo de componente no soportado: %s", compType)
+		return fmt.Errorf("unsupported component type: %s", compType)
 	}
 
 	return s.createFile(targetPath, templatePath, data)
 }
 
-// GenerateCRUD genera toda la estructura para una entidad CRUD
+// GenerateCRUD generates the full structure for a CRUD entity
 func (s *Scaffolder) GenerateCRUD(name string) error {
 	data := struct {
 		ui.ProjectConfig
@@ -210,7 +210,7 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 		EntityName:    name,
 	}
 
-	fmt.Printf("🚀 Generando CRUD completo para '%s'...\n", name)
+	fmt.Printf("🚀 Generating full CRUD for '%s'...\n", name)
 
 	var files map[string]string
 	if s.config.Architecture == "Hexagonal" {
@@ -236,7 +236,7 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 		}
 	}
 
-	fmt.Println("\n✅ CRUD generado exitosamente.")
-	fmt.Println("📍 No olvides registrar las rutas en tu router principal.")
+	fmt.Println("\n✅ CRUD generated successfully.")
+	fmt.Println("📍 Remember to register the routes in your main router.")
 	return nil
 }

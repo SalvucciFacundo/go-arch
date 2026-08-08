@@ -13,7 +13,7 @@ import (
 	"github.com/jinzhu/inflection"
 )
 
-// Templates es el FS embebido que contiene todas las plantillas.
+// Templates is the embedded FS containing all templates.
 //
 //go:embed all:templates/*
 var TemplatesFS embed.FS
@@ -35,7 +35,7 @@ func (e *Engine) Render(wr io.Writer, templatePath string, data interface{}) err
 	}
 
 	if source != "embedded" {
-		fmt.Printf("🎨 Usando plantilla personalizada (%s): %s\n", source, templatePath)
+		fmt.Printf("🎨 Using custom template (%s): %s\n", source, templatePath)
 	}
 
 	return t.Execute(wr, data)

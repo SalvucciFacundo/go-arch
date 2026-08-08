@@ -24,16 +24,16 @@ var generateCmd = &cobra.Command{
 		compType := args[0]
 		name := args[1]
 
-		// Validar configuración básica
+		// Validate basic config
 		projectName := viper.GetString("project_name")
 		if projectName == "" {
 			return oops.
 				Code("missing_config").
-				Hint("Ejecuta 'go-arch setup' para inicializar el proyecto").
-				Errorf("No se encontró el archivo .go-arch.yaml o está vacío")
+				Hint("Run 'go-arch setup' to initialize the project").
+				Errorf(".go-arch.yaml file not found or empty")
 		}
 
-		// Mapear configuración de Viper a struct
+		// Map Viper config to struct
 		config := &ui.ProjectConfig{
 			ProjectName:  projectName,
 			ModuleName:   viper.GetString("module_name"),
@@ -42,7 +42,7 @@ var generateCmd = &cobra.Command{
 			UseDocker:    viper.GetBool("use_docker"),
 		}
 
-		ui.Info(fmt.Sprintf("Generando componente %s: %s...", compType, name))
+		ui.Info(fmt.Sprintf("Generating %s component: %s...", compType, name))
 
 		scaffolder := scaffold.NewScaffolder(config)
 		var err error
@@ -57,10 +57,10 @@ var generateCmd = &cobra.Command{
 				Code("generation_failed").
 				With("type", compType).
 				With("name", name).
-				Wrapf(err, "Falló la generación del componente")
+				Wrapf(err, "Component generation failed")
 		}
 
-		ui.Success(fmt.Sprintf("Componente '%s' (%s) generado correctamente.", name, compType))
+		ui.Success(fmt.Sprintf("Component '%s' (%s) generated successfully.", name, compType))
 		return nil
 	},
 }

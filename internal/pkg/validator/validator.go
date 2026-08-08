@@ -13,11 +13,11 @@ import (
 	"github.com/samber/oops"
 )
 
-// Violation representa una infracción a las reglas arquitectónicas.
+// Violation represents an architectural rule violation.
 type Violation struct {
 	File     string
 	Message  string
-	Severity string // "ERROR" o "WARNING"
+	Severity string // "ERROR" or "WARNING"
 }
 
 type Validator struct {
@@ -28,20 +28,20 @@ func NewValidator(config *ui.ProjectConfig) *Validator {
 	return &Validator{config: config}
 }
 
-// Validate verifica la estructura del proyecto y las dependencias según la arquitectura configurada.
+// Validate verifies the project structure and dependencies according to the configured architecture.
 func (v *Validator) Validate() ([]Violation, error) {
 	var violations []Violation
 
-	// 1. Validar integridad de carpetas
+	// 1. Validate folder integrity
 	structureViolations := v.checkStructure()
 	violations = append(violations, structureViolations...)
 
-	// 2. Validar reglas de imports (Dependency Rule)
+	// 2. Validate import rules (Dependency Rule)
 	dependencyViolations, err := v.checkDependencies()
 	if err != nil {
 		return nil, oops.
 			Code("validator_io_error").
-			Wrapf(err, "Error analizando dependencias del proyecto")
+			Wrapf(err, "Error analyzing project dependencies")
 	}
 	violations = append(violations, dependencyViolations...)
 
@@ -63,7 +63,7 @@ func (v *Validator) checkStructure() []Violation {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			violations = append(violations, Violation{
 				File:     dir,
-				Message:  fmt.Sprintf("Falta la carpeta requerida para el layout %s", v.config.Architecture),
+				Message:  fmt.Sprintf("Missing required folder for layout %s", v.config.Architecture),
 				Severity: "ERROR",
 			})
 		}
@@ -86,7 +86,7 @@ func (v *Validator) checkDependencies() ([]Violation, error) {
 		fset := token.NewFileSet()
 		f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
 		if err != nil {
-			return nil // Ignorar archivos con errores de sintaxis por ahora
+			return nil // Ignore files with syntax errors for now
 		}
 
 		fileViolations := v.applyArchitectureRules(path, f.Imports)
@@ -105,7 +105,7 @@ func (v *Validator) applyArchitectureRules(path string, imports []*ast.ImportSpe
 	for _, imp := range imports {
 		importPath := strings.Trim(imp.Path.Value, "\"")
 		
-		// Solo nos interesan los imports internos del propio proyecto
+		// We are only interested in the project's own internal imports
 		if !strings.HasPrefix(importPath, modulePrefix) {
 			continue
 		}
@@ -114,42 +114,42 @@ func (v *Validator) applyArchitectureRules(path string, imports []*ast.ImportSpe
 
 		switch v.config.Architecture {
 		case "Hexagonal":
-			// Regla: domain no puede importar nada de ports o adapters
+			// Rule: domain cannot import anything from ports or adapters
 			if strings.Contains(path, "internal/domain") {
 				if strings.Contains(relImport, "/ports") || strings.Contains(relImport, "/adapters") {
 					violations = append(violations, Violation{
 						File:     path,
-						Message:  fmt.Sprintf("Fuga de capas: Dominio no debe importar '%s'", importPath),
+						Message:  fmt.Sprintf("Layer leak: domain must not import '%s'", importPath),
 						Severity: "ERROR",
 					})
 				}
 			}
-			// Regla: ports no puede importar adapters
+			// Rule: ports cannot import adapters
 			if strings.Contains(path, "internal/ports") {
 				if strings.Contains(relImport, "/adapters") {
 					violations = append(violations, Violation{
 						File:     path,
-						Message:  fmt.Sprintf("Fuga de capas: Los Puertos (interfaces) no deben importar Adaptadores '%s'", importPath),
+						Message:  fmt.Sprintf("Layer leak: ports (interfaces) must not import adapters '%s'", importPath),
 						Severity: "ERROR",
 					})
 				}
 			}
 
 		case "Standard":
-			// Regla: model no importa nada
+			// Rule: model imports nothing
 			if strings.Contains(path, "internal/model") {
 				violations = append(violations, Violation{
 					File:     path,
-					Message:  fmt.Sprintf("El paquete 'model' debe ser autocontenido, no debe importar '%s'", importPath),
+					Message:  fmt.Sprintf("Package 'model' must be self-contained and must not import '%s'", importPath),
 					Severity: "ERROR",
 				})
 			}
-			// Regla: repository no importa service ni handler
+			// Rule: repository does not import service or handler
 			if strings.Contains(path, "internal/repository") {
 				if strings.Contains(relImport, "/service") || strings.Contains(relImport, "/handler") {
 					violations = append(violations, Violation{
 						File:     path,
-						Message:  fmt.Sprintf("Inversión de dependencias prohibida: El repositorio no debe depender de '%s'", importPath),
+						Message:  fmt.Sprintf("Forbidden dependency inversion: repository must not depend on '%s'", importPath),
 						Severity: "ERROR",
 					})
 				}

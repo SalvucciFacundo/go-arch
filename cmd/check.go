@@ -19,13 +19,13 @@ var checkCmd = &cobra.Command{
 	Short: "Check project architecture health",
 	Long:  `Validates the project structure and dependency rules (imports) based on the configured architecture.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// 1. Cargar configuración (ya leída en root, pero validamos campos críticos)
+		// 1. Load configuration (already read in root, but validate critical fields)
 		projectName := viper.GetString("project_name")
 		if projectName == "" {
 			return oops.
 				Code("missing_config").
-				Hint("Ejecuta 'go-arch setup' para inicializar el proyecto").
-				Errorf("No se encontró configuración válida. ¿Estás en la raíz de un proyecto go-arch?")
+				Hint("Run 'go-arch setup' to initialize the project").
+				Errorf("No valid configuration found. Are you in the root of a go-arch project?")
 		}
 
 		config := &ui.ProjectConfig{
@@ -41,15 +41,15 @@ var checkCmd = &cobra.Command{
 		if err != nil {
 			return oops.
 				Code("validation_failed").
-				Wrapf(err, "Error crítico durante la validación de arquitectura")
+				Wrapf(err, "Critical error during architecture validation")
 		}
 
 		if len(violations) == 0 {
-			ui.Success("¡Arquitectura impecable! No se detectaron infracciones.")
+			ui.Success("Architecture is clean! No violations detected.")
 			return nil
 		}
 
-		ui.Warning(fmt.Sprintf("Se detectaron %d infracción(es):", len(violations)))
+		ui.Warning(fmt.Sprintf("Detected %d violation(s):", len(violations)))
 		fmt.Println()
 
 		for _, v := range violations {
@@ -62,6 +62,6 @@ var checkCmd = &cobra.Command{
 
 		return oops.
 			Code("architecture_violations").
-			Errorf("El proyecto no cumple con las reglas arquitectónicas")
+			Errorf("The project does not comply with the architectural rules")
 	},
 }

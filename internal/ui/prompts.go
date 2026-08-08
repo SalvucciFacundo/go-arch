@@ -18,7 +18,7 @@ type ProjectConfig struct {
 }
 
 func RunWizard() (*ProjectConfig, error) {
-	fmt.Println("🚀 Bienvenido al asistente de Go-Arch")
+	fmt.Println("🚀 Welcome to the Go-Arch wizard")
 	
 	config := &ProjectConfig{}
 
@@ -26,7 +26,7 @@ func RunWizard() (*ProjectConfig, error) {
 		{
 			Name: "ProjectName",
 			Prompt: &survey.Input{
-				Message: "Nombre del proyecto:",
+				Message: "Project name:",
 				Default: "my-go-app",
 			},
 			Validate: survey.Required,
@@ -34,14 +34,14 @@ func RunWizard() (*ProjectConfig, error) {
 		{
 			Name: "ModuleName",
 			Prompt: &survey.Input{
-				Message: "Nombre del módulo (Go Module):",
+				Message: "Go module name:",
 				Default: "github.com/user/app",
 			},
 		},
 		{
 			Name: "Architecture",
 			Prompt: &survey.Select{
-				Message: "Selecciona la arquitectura:",
+				Message: "Select the architecture:",
 				Options: []string{"Minimalist", "Standard", "Hexagonal"},
 				Default: "Standard",
 			},
@@ -49,7 +49,7 @@ func RunWizard() (*ProjectConfig, error) {
 		{
 			Name: "DBDriver",
 			Prompt: &survey.Select{
-				Message: "Selecciona el driver de base de datos:",
+				Message: "Select the database driver:",
 				Options: []string{"PostgreSQL", "MySQL", "MongoDB", "None"},
 				Default: "None",
 			},
@@ -57,21 +57,21 @@ func RunWizard() (*ProjectConfig, error) {
 		{
 			Name: "UseDocker",
 			Prompt: &survey.Confirm{
-				Message: "¿Deseas incluir configuración de Docker?",
+				Message: "Include Docker configuration?",
 				Default: true,
 			},
 		},
 		{
 			Name: "UseObservability",
 			Prompt: &survey.Confirm{
-				Message: "¿Deseas habilitar Telemetría/Observabilidad (OpenTelemetry)?",
+				Message: "Enable Telemetry/Observability (OpenTelemetry)?",
 				Default: false,
 			},
 		},
 		{
 			Name: "UseGRPC",
 			Prompt: &survey.Confirm{
-				Message: "¿Deseas habilitar un servidor gRPC para Microservicios?",
+				Message: "Enable a gRPC server for Microservices?",
 				Default: false,
 			},
 		},
@@ -84,7 +84,7 @@ func RunWizard() (*ProjectConfig, error) {
 
 	if config.UseObservability {
 		var obsQ = &survey.Select{
-			Message: "Selecciona la herramienta de visualización:",
+			Message: "Select the visualization tool:",
 			Options: []string{"Console", "Jaeger", "Zipkin", "Prometheus", "SigNoz"},
 			Default: "Console",
 		}

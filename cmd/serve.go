@@ -24,8 +24,8 @@ var serveCmd = &cobra.Command{
 		if layout == "" {
 			return oops.
 				Code("missing_config").
-				Hint("Asegúrate de estar en la raíz de un proyecto go-arch").
-				Errorf("No se encontró configuración válida de arquitectura")
+				Hint("Make sure you are in the root of a go-arch project").
+				Errorf("No valid architecture configuration found")
 		}
 
 		mainPath := "cmd/api/main.go"
@@ -33,26 +33,26 @@ var serveCmd = &cobra.Command{
 			mainPath = "main.go"
 		}
 
-		ui.Info(fmt.Sprintf("Iniciando servidor para el proyecto (Layout: %s)...", layout))
+		ui.Info(fmt.Sprintf("Starting server for the project (Layout: %s)...", layout))
 
-		// Verificar si Air está instalado
+		// Check if Air is installed
 		_, err := exec.LookPath("air")
 		if err == nil {
-			ui.Info("🔥 Usando Air para hot-reload...")
+			ui.Info("🔥 Using Air for hot-reload...")
 			if err := runWithAir(); err != nil {
 				return oops.
 					Code("server_error").
-					Wrapf(err, "Falló la ejecución de 'air'")
+					Wrapf(err, "'air' execution failed")
 			}
 			return nil
 		}
 
-		ui.Warning("Air no detectado en el PATH. Usando 'go run' (sin hot-reload)...")
+		ui.Warning("Air not detected in PATH. Using 'go run' (no hot-reload)...")
 		if err := runWithGo(mainPath); err != nil {
 			return oops.
 				Code("server_error").
 				With("path", mainPath).
-				Wrapf(err, "Falló la ejecución de 'go run'")
+				Wrapf(err, "'go run' execution failed")
 		}
 
 		return nil

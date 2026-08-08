@@ -4,9 +4,9 @@ package {{ .ProjectName | lower }};
 
 option go_package = "{{ .ModuleName }}/internal/adapters/grpc/proto";
 
-// {{ .ProjectName | title }}Service define el contrato principal del microservicio.
+// {{ .ProjectName | title }}Service defines the main service contract.
 service {{ .ProjectName | title }}Service {
-  // HealthCheck verifica la salud del servicio.
+  // HealthCheck checks the service health.
   rpc HealthCheck(HealthRequest) returns (HealthResponse);
 }
 

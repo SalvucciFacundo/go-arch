@@ -33,7 +33,7 @@ func Info(msg string) {
 
 // Analyzing prints a special message for the "check" command.
 func Analyzing(architecture string) {
-	fmt.Fprintf(Out, "🔍 %s **%s**...\n\n", ansi.Color("Analizando arquitectura", "cyan+b"), architecture)
+	fmt.Fprintf(Out, "🔍 %s **%s**...\n\n", ansi.Color("Analyzing architecture", "cyan+b"), architecture)
 }
 
 // Fatal prints an error message and exits the program.

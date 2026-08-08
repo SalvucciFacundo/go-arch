@@ -8,14 +8,14 @@ import (
 )
 
 func TestValidator_checkStructure(t *testing.T) {
-	// Crear un directorio temporal para el test
+	// Create a temporary directory for the test
 	tmpDir, err := os.MkdirTemp("", "validator_test_*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Cambiar el directorio de trabajo para el test
+	// Change the working directory for the test
 	oldWd, _ := os.Getwd()
 	os.Chdir(tmpDir)
 	defer os.Chdir(oldWd)
@@ -25,17 +25,17 @@ func TestValidator_checkStructure(t *testing.T) {
 	}
 	v := NewValidator(config)
 
-	// Caso 1: Estructura vacía -> Debería haber 3 errores (domain, ports, adapters)
+	// Case 1: Empty structure -> Should have 3 errors (domain, ports, adapters)
 	violations := v.checkStructure()
 	if len(violations) != 3 {
-		t.Errorf("Esperaba 3 violaciones de estructura, obtuve %d", len(violations))
+		t.Errorf("Expected 3 structure violations, got %d", len(violations))
 	}
 
-	// Caso 2: Crear una carpeta -> Debería haber 2 errores
+	// Case 2: Create a folder -> Should have 2 errors
 	os.MkdirAll("internal/domain", 0755)
 	violations = v.checkStructure()
 	if len(violations) != 2 {
-		t.Errorf("Esperaba 2 violaciones de estructura, obtuve %d", len(violations))
+		t.Errorf("Expected 2 structure violations, got %d", len(violations))
 	}
 }
 
@@ -80,15 +80,15 @@ func TestValidator_applyArchitectureRules_Hexagonal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulamos el objeto ast.ImportSpec de forma minimalista para el test interno
-			// Nota: En el código real usamos applyArchitectureRules que recibe []*ast.ImportSpec
-			// Para el test, vamos a invocar la lógica interna que extrajimos.
-			
-			// Como la lógica está en un método privado o semi-privado, podemos testearla 
-			// pasando un dummy o ajustando la visibilidad si fuera necesario.
-			// Por simplicidad en este entorno, verificamos la lógica del switch.
-			
-			// Re-implementación rápida de la lógica para el test de unidad puro
+			// We simulate the ast.ImportSpec object in a minimal way for the internal test
+			// Note: In the real code we use applyArchitectureRules which receives []*ast.ImportSpec
+			// For the test, we invoke the internal logic we extracted.
+
+			// Since the logic is in a private or semi-private method, we can test it
+			// by passing a dummy or adjusting visibility if necessary.
+			// For simplicity in this environment, we verify the switch logic.
+
+			// Quick re-implementation of the logic for the pure unit test
 			violations := v.applyArchitectureRules(tt.path, createDummyImports(tt.importPath))
 			if (len(violations) > 0) != tt.wantError {
 				t.Errorf("applyArchitectureRules() error = %v, wantError %v", len(violations) > 0, tt.wantError)
@@ -97,7 +97,7 @@ func TestValidator_applyArchitectureRules_Hexagonal(t *testing.T) {
 	}
 }
 
-// Helper para crear imports falsos para el test
+// Helper to create fake imports for the test
 func createDummyImports(path string) []*ast.ImportSpec {
 	importSpec := &ast.ImportSpec{
 		Path: &ast.BasicLit{

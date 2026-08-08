@@ -112,7 +112,7 @@ func TestEngine_FuncMap(t *testing.T) {
 func TestEngine_Lookup(t *testing.T) {
 	engine := NewEngine()
 
-	// Crear una carpeta temporal que simule el FS de plantillas externas
+	// Create a temporary folder that simulates the external templates FS
 	localTmplDir := filepath.Join(".go-arch", "templates", "common")
 	if err := os.MkdirAll(localTmplDir, 0755); err != nil {
 		t.Fatal(err)

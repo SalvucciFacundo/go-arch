@@ -26,7 +26,7 @@ func Execute() {
 		ui.Fatal(oops.
 			Code("root_execution_failed").
 			Hint("Check your flags or config file").
-			Wrapf(err, "Error al ejecutar el comando principal"))
+			Wrapf(err, "Failed to execute the main command"))
 	}
 }
 
@@ -46,7 +46,7 @@ func initConfig() {
 		if err != nil {
 			ui.Fatal(oops.
 				Code("home_dir_failed").
-				Wrapf(err, "No se pudo encontrar el directorio personal del usuario"))
+				Wrapf(err, "Could not find the user home directory"))
 		}
 		viper.AddConfigPath(home)
 		viper.AddConfigPath(".")

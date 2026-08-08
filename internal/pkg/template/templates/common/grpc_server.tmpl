@@ -21,7 +21,7 @@ func NewServer() *Server {
 	opts := []grpc.ServerOption{}
 	
 	{{ if .UseObservability }}
-	// Integrar interceptores de OpenTelemetry
+	// Integrate OpenTelemetry interceptors
 	opts = append(opts, grpc.StatsHandler(otelgrpc.NewServerHandler()))
 	{{ end }}
 
@@ -46,7 +46,7 @@ func (s *Server) Stop() {
 	s.grpcServer.GracefulStop()
 }
 
-// HealthCheck implementación del contrato proto
+// HealthCheck implements the proto contract
 func (s *Server) HealthCheck(ctx context.Context, req *proto.HealthRequest) (*proto.HealthResponse, error) {
 	return &proto.HealthResponse{
 		Status:  "UP",
