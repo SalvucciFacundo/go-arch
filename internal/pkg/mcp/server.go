@@ -159,13 +159,13 @@ func handleRequest(req *Request) {
 				},
 				map[string]interface{}{
 					"name":        "generate_component",
-					"description": "Generate standard components (service, repository, handler, or crud) for the project.",
+					"description": "Generate standard components (service, repository, handler, crud, page, or component) for the project.",
 					"inputSchema": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
 							"type": map[string]interface{}{
 								"type":        "string",
-								"enum":        []string{"service", "repository", "handler", "crud"},
+								"enum":        []string{"service", "repository", "handler", "crud", "page", "component"},
 								"description": "Type of the component to generate",
 							},
 							"name": map[string]interface{}{
@@ -295,6 +295,7 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			Architecture: viper.GetString("architecture"),
 			DBDriver:     viper.GetString("db_driver"),
 			UseDocker:    viper.GetBool("use_docker"),
+			UseTemplHTMX: viper.GetBool("use_templ_htmx"),
 		}
 
 		scaffolder := scaffold.NewScaffolder(cfg)
