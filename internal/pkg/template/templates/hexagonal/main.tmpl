@@ -1,11 +1,13 @@
 package main
 
 import (
-	"context"
 	"fmt"
+	{{ if .UseObservability }}
+	"context"
+	{{ end }}
+	{{ if or .UseObservability .UseGRPC }}
 	"log"
-	"{{ .ModuleName }}/internal/adapters"
-	"{{ .ModuleName }}/internal/domain"
+	{{ end }}
 	{{ if .UseObservability }}
 	"{{ .ModuleName }}/internal/telemetry"
 	{{ end }}
@@ -36,7 +38,6 @@ func main() {
 	}()
 	{{ end }}
 
-	// Wire up ports and adapters
 	// Keep the main process alive
 	{{ if .UseGRPC }}
 	select {}
