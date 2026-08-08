@@ -1,0 +1,57 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Go 1.24.0, Cobra CLI, Viper config, Survey prompts, Samber/oops errors
+  Architecture: Clean Architecture (cmd → internal/pkg → internal/ui)
+  Testing: go test ./... (scaffold, template, validator packages have tests)
+  Style: Conventional commits, English artifacts, Go idiomatic naming
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Reference existing CLI commands when scoping impact
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+    - Reference Samber libraries when choosing patterns
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns in cmd/ and internal/
+      - Use samber/oops for error wrapping with context codes
+      - Use internal/ui for all CLI output (Success, Warning, Error, Info)
+    tdd: true
+    test_command: "go test ./..."
+  verify:
+    test_command: "go test ./..."
+    build_command: "go build ./..."
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
+
+testing:
+  strict_tdd: true
+  runner: "go test ./..."
+  framework: "go testing stdlib"
+  test_files:
+    - internal/pkg/scaffold/scaffold_test.go
+    - internal/pkg/template/engine_test.go
+    - internal/pkg/validator/validator_test.go
+  coverage:
+    available: true
+    command: "go test -cover ./..."
+  quality:
+    linter:
+      available: false
+      command: ""
+    type_checker:
+      available: true
+      command: "go vet ./..."
+    formatter:
+      available: true
+      command: "gofmt -w ."

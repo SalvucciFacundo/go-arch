@@ -15,11 +15,12 @@ type ProjectConfig struct {
 	UseObservability     bool   `mapstructure:"use_observability"`
 	ObservabilityBackend string `mapstructure:"observability_backend"`
 	UseGRPC              bool   `mapstructure:"use_grpc"`
+	UseTemplHTMX         bool   `mapstructure:"use_templ_htmx"`
 }
 
 func RunWizard() (*ProjectConfig, error) {
 	fmt.Println("🚀 Welcome to the Go-Arch wizard")
-	
+
 	config := &ProjectConfig{}
 
 	var mainQs = []*survey.Question{
@@ -72,6 +73,13 @@ func RunWizard() (*ProjectConfig, error) {
 			Name: "UseGRPC",
 			Prompt: &survey.Confirm{
 				Message: "Enable a gRPC server for Microservices?",
+				Default: false,
+			},
+		},
+		{
+			Name: "UseTemplHTMX",
+			Prompt: &survey.Confirm{
+				Message: "Include templ + HTMX frontend?",
 				Default: false,
 			},
 		},

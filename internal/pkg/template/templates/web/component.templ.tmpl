@@ -1,0 +1,8 @@
+package components
+
+templ Counter(count int) {
+	<div id="counter" hx-post="/counter" hx-target="#counter" hx-swap="innerHTML">
+		<p>Count: { count }</p>
+		<button type="submit">+1</button>
+	</div>
+}

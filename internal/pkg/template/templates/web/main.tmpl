@@ -2,13 +2,12 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"net/http"
+
+	"{{ .ModuleName }}/internal/handler"
 	{{ if .UseObservability }}
 	"context"
-	{{ end }}
-	{{ if or .UseObservability .UseGRPC }}
-	"log"
-	{{ end }}
-	{{ if .UseObservability }}
 	"{{ .ModuleName }}/internal/telemetry"
 	{{ end }}
 	{{ if .UseGRPC }}
@@ -17,9 +16,9 @@ import (
 )
 
 func main() {
-	fmt.Println("🚀 Hexagonal Architecture project '{{ .ProjectName }}' initialized!")
-	
+	fmt.Println("🚀 {{ .ProjectName }} — templ + HTMX frontend")
 	{{ if .UseObservability }}
+
 	// Initialize Telemetry
 	shutdown, err := telemetry.InitTracer("{{ .ProjectName }}", "{{ .ObservabilityBackend }}")
 	if err != nil {
@@ -27,8 +26,8 @@ func main() {
 	}
 	defer shutdown(context.Background())
 	{{ end }}
-
 	{{ if .UseGRPC }}
+
 	// Initialize gRPC Server in a goroutine
 	go func() {
 		gs := grpc_server.NewServer()
@@ -38,7 +37,16 @@ func main() {
 	}()
 	{{ end }}
 
-	// Keep the main process alive
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /", handler.PageHandler)
+	mux.HandleFunc("POST /counter", handler.CounterHandler)
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	fmt.Println("Listening on :8080")
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		log.Fatalf("server error: %v", err)
+	}
 	{{ if .UseGRPC }}
 	select {}
 	{{ end }}
