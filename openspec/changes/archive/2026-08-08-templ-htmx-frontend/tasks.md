@@ -1,5 +1,7 @@
 # Tasks: templ + HTMX Frontend Flag (`UseTemplHTMX`)
 
+**Status**: CLOSED — archived `2026-08-08`. All 21/21 tasks complete; verify verdict PASS (22/22 spec scenarios). Change moved to `openspec/changes/archive/2026-08-08-templ-htmx-frontend/`.
+
 ## Review Workload Forecast
 
 | Field | Value |
