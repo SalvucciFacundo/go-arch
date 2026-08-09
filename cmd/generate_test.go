@@ -29,6 +29,90 @@ func TestTemplHint(t *testing.T) {
 	}
 }
 
+// TestGenerateRouteFlag verifies task 3.3: --route flag on generate handler
+// passes the route pattern to GenerateComponent and the handler is registered.
+func TestGenerateRouteFlag(t *testing.T) {
+	t.Run("handler with --route registers route", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "gen-route-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		oldWd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(oldWd)
+
+		configYAML := `project_name: "."
+module_name: github.com/test/routeflag
+architecture: Standard
+use_templ_htmx: true
+`
+		if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		buf := new(bytes.Buffer)
+		RootCmd.SetOut(buf)
+		RootCmd.SetErr(buf)
+		RootCmd.SetArgs([]string{"generate", "handler", "Stats", "--route", "GET /stats"})
+
+		err = RootCmd.Execute()
+		if err != nil {
+			t.Fatalf("generate handler --route failed: %v\nOutput: %s", err, buf.String())
+		}
+
+		// Verify routes.go was created with the handler registration
+		routesPath := filepath.Join(tmpDir, "internal", "router", "routes.go")
+		routesContent, rErr := os.ReadFile(routesPath)
+		if rErr != nil {
+			t.Fatalf("expected routes.go to exist: %v", rErr)
+		}
+		if !strings.Contains(string(routesContent), "GET /stats") {
+			t.Errorf("routes.go should contain 'GET /stats', got:\n%s", string(routesContent))
+		}
+		if !strings.Contains(string(routesContent), "StatsHandler") {
+			t.Errorf("routes.go should contain 'StatsHandler', got:\n%s", string(routesContent))
+		}
+	})
+}
+
+// TestGenerateInvalidRoutePattern verifies that --route with a bad pattern
+// fails with invalid_route_pattern error.
+func TestGenerateInvalidRoutePattern(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gen-badroute-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	configYAML := `project_name: "."
+module_name: github.com/test/badroute
+architecture: Standard
+use_templ_htmx: true
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := new(bytes.Buffer)
+	RootCmd.SetOut(buf)
+	RootCmd.SetErr(buf)
+	RootCmd.SetArgs([]string{"generate", "handler", "X", "--route", "BADPATTERN"})
+
+	err = RootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected invalid_route_pattern error, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid_route_pattern") && !strings.Contains(err.Error(), "invalid route pattern") {
+		t.Errorf("expected invalid_route_pattern in error, got: %v", err)
+	}
+}
+
 // TestGenerateCLI verifies task 3.1: smoke test (page gen shows templ hint)
 // and help lists all six types. Both run inside one function because cobra
 // RootCmd has global state that persists across test functions.
@@ -68,7 +152,7 @@ use_templ_htmx: true
 		}
 	})
 
-	t.Run("help lists all six types", func(t *testing.T) {
+	t.Run("help lists all types and --route", func(t *testing.T) {
 		buf := new(bytes.Buffer)
 		RootCmd.SetOut(buf)
 		RootCmd.SetErr(buf)
@@ -79,10 +163,13 @@ use_templ_htmx: true
 		}
 
 		out := buf.String()
-		for _, want := range []string{"service", "repository", "handler", "crud", "page", "component"} {
+		for _, want := range []string{"service", "repository", "handler", "crud", "page", "component", "--route"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("generate --help should mention %q; got:\n%s", want, out)
 			}
+		}
+		if !strings.Contains(out, "auto-registers") && !strings.Contains(out, "CRUD") {
+			t.Errorf("generate --help should note CRUD auto-registers in web projects; got:\n%s", out)
 		}
 	})
 }
