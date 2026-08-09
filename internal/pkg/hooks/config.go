@@ -255,6 +255,7 @@ func parseTimeoutNode(node *yaml.Node, e *Entry) error {
 		if node.Tag == "!!int" || node.Value == "0" {
 			if node.Value == "0" {
 				e.Timeout = 0
+				e.TimeoutSet = true
 				return nil
 			}
 			// Non-zero integer — treat as seconds.
@@ -266,6 +267,7 @@ func parseTimeoutNode(node *yaml.Node, e *Entry) error {
 					Errorf("invalid timeout %q: %v", node.Value, err)
 			}
 			e.Timeout = d
+			e.TimeoutSet = true
 			return nil
 		}
 		d, err := time.ParseDuration(node.Value)
@@ -276,6 +278,7 @@ func parseTimeoutNode(node *yaml.Node, e *Entry) error {
 				Errorf("invalid timeout %q: %v", node.Value, err)
 		}
 		e.Timeout = d
+		e.TimeoutSet = true
 		return nil
 
 	default:

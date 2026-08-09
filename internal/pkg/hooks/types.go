@@ -20,12 +20,16 @@ var validTypes = map[Type]bool{
 // Entry represents one hook command as parsed from .go-arch.yaml.
 //
 // Shell is true when the entry originated from the YAML string shorthand.
+// TimeoutSet distinguishes "not configured" (use 30s default) from
+// "explicitly 0" (disable timeout). Callers should check TimeoutSet before
+// assuming an explicit duration value.
 type Entry struct {
 	Command       string            // required; command name or empty for missing
 	Args          []string          // argv for object form
 	Cwd           string            // per-hook working directory override
 	Env           map[string]string // per-hook environment overrides
-	Timeout       time.Duration     // per-hook timeout; 0 disables
+	Timeout       time.Duration     // per-hook timeout; only meaningful when TimeoutSet
+	TimeoutSet    bool              // true when timeout was parsed from YAML
 	Silent        bool              // suppress stdout/stderr echo
 	IgnoreFailure bool              // continue on non-zero exit
 	Shell         bool              // true when parsed from string form
