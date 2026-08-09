@@ -62,14 +62,8 @@ var doctorCmd = &cobra.Command{
 
 		// 5. Project configuration (only when in a go-arch project)
 		fmt.Println()
-		projectName := viper.GetString("project_name")
-		if projectName == "" {
-			check("Project config", "not in a go-arch project (no .go-arch.yaml found)", false)
-		} else {
-			architecture := viper.GetString("architecture")
-			moduleName := viper.GetString("module_name")
-			check("Project config", fmt.Sprintf("%s (%s) — %s", projectName, moduleName, architecture), true)
-		}
+		status, ok := projectConfigStatus()
+		check("Project config", status, ok)
 
 		fmt.Println()
 		if issues > 0 {
@@ -81,4 +75,17 @@ var doctorCmd = &cobra.Command{
 		ui.Success(fmt.Sprintf("All %d checks passed.", checks))
 		return nil
 	},
+}
+
+// projectConfigStatus reports the current project configuration state. It is
+// extracted as a pure function so tests can verify the deterministic parts of
+// the doctor command without depending on external tools (go, air, git).
+func projectConfigStatus() (status string, ok bool) {
+	projectName := viper.GetString("project_name")
+	if projectName == "" {
+		return "not in a go-arch project (no .go-arch.yaml found)", false
+	}
+	architecture := viper.GetString("architecture")
+	moduleName := viper.GetString("module_name")
+	return fmt.Sprintf("%s (%s) — %s", projectName, moduleName, architecture), true
 }
