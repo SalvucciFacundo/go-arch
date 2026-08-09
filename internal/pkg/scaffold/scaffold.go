@@ -3,6 +3,7 @@ package scaffold
 import (
 	"bytes"
 	"fmt"
+	"go-arch/internal/pkg/hooks"
 	"go-arch/internal/pkg/template"
 	"go-arch/internal/ui"
 	"go/token"
@@ -16,14 +17,34 @@ import (
 type Scaffolder struct {
 	engine   *template.Engine
 	config   *ui.ProjectConfig
-	manifest *Manifest // lazy-loaded via ensureManifest
+	manifest *Manifest     // lazy-loaded via ensureManifest
+	runner   *hooks.Runner // lifecycle hooks runner (nil = no hooks)
+	version  string        // CLI/MCP version — written to .go-arch.yaml during Execute
 }
 
-func NewScaffolder(config *ui.ProjectConfig) *Scaffolder {
-	return &Scaffolder{
+// ScaffoldOption configures optional behaviour for a Scaffolder.
+type ScaffoldOption func(*Scaffolder)
+
+// WithRunner injects a hooks runner into the Scaffolder.
+// When nil, hooks are silently skipped (no-op default).
+func WithRunner(r *hooks.Runner) ScaffoldOption {
+	return func(s *Scaffolder) { s.runner = r }
+}
+
+// WithVersion sets the version string written to .go-arch.yaml during Execute.
+func WithVersion(v string) ScaffoldOption {
+	return func(s *Scaffolder) { s.version = v }
+}
+
+func NewScaffolder(config *ui.ProjectConfig, opts ...ScaffoldOption) *Scaffolder {
+	s := &Scaffolder{
 		engine: template.NewEngine(),
 		config: config,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // manifestDir returns the project root for manifest operations.
@@ -78,6 +99,25 @@ func (s *Scaffolder) recordManifest(targetPath, templatePath string, origin Orig
 }
 
 func (s *Scaffolder) Execute() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	// Fire pre-new hook BEFORE any filesystem operations.
+	// The project directory does NOT exist yet at this point.
+	if s.runner != nil {
+		envCtx := hooks.EnvContext{
+			ProjectName: s.config.ProjectName,
+			ProjectPath: cwd,
+			Arch:        s.config.Architecture,
+			HookType:    hooks.PreNew,
+		}
+		if err := s.runner.Fire(hooks.PreNew, envCtx, cwd); err != nil {
+			return err
+		}
+	}
+
 	fmt.Printf("🏗️ Creating project '%s' with %s architecture...\n", s.config.ProjectName, s.config.Architecture)
 
 	// 1. Create base directory
@@ -86,16 +126,41 @@ func (s *Scaffolder) Execute() error {
 	}
 
 	// 2. Generate structure according to the layout
+	var err2 error
 	switch s.config.Architecture {
 	case "Minimalist":
-		return s.scaffoldMinimalist()
+		err2 = s.scaffoldMinimalist()
 	case "Standard":
-		return s.scaffoldStandard()
+		err2 = s.scaffoldStandard()
 	case "Hexagonal":
-		return s.scaffoldHexagonal()
+		err2 = s.scaffoldHexagonal()
 	default:
 		return fmt.Errorf("unsupported architecture: %s", s.config.Architecture)
 	}
+	if err2 != nil {
+		return err2
+	}
+
+	// 3. Write version field (non-fatal — post-new fires regardless)
+	projDir := filepath.Join(cwd, s.manifestDir())
+	if s.version != "" {
+		_ = WriteVersionField(filepath.Join(projDir, ".go-arch.yaml"), s.version)
+	}
+
+	// 4. Fire post-new hook AFTER all files written AND version field set.
+	if s.runner != nil {
+		envCtx := hooks.EnvContext{
+			ProjectName: s.config.ProjectName,
+			ProjectPath: projDir,
+			Arch:        s.config.Architecture,
+			HookType:    hooks.PostNew,
+		}
+		if err := s.runner.Fire(hooks.PostNew, envCtx, projDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *Scaffolder) createFile(path string, templatePath string, data interface{}) error {
@@ -321,6 +386,20 @@ func WithRoute(pattern string) GenerateOption {
 // GenerateComponent generates a specific component (service, repository, handler).
 // Accepts variadic GenerateOption for optional route registration.
 func (s *Scaffolder) GenerateComponent(compType, name string, opts ...GenerateOption) error {
+	// Fire pre-generate hook before any work.
+	if s.runner != nil {
+		cwd, _ := os.Getwd()
+		envCtx := hooks.EnvContext{
+			ProjectName: s.config.ProjectName,
+			ProjectPath: cwd,
+			Arch:        s.config.Architecture,
+			HookType:    hooks.PreGenerate,
+		}
+		if err := s.runner.Fire(hooks.PreGenerate, envCtx, cwd); err != nil {
+			return err
+		}
+	}
+
 	cfg := &generateConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -436,11 +515,39 @@ func (s *Scaffolder) GenerateComponent(compType, name string, opts ...GenerateOp
 		}
 	}
 
+	// Fire post-generate hook after all work completes (including routes registry).
+	if s.runner != nil {
+		cwd, _ := os.Getwd()
+		envCtx := hooks.EnvContext{
+			ProjectName: s.config.ProjectName,
+			ProjectPath: cwd,
+			Arch:        s.config.Architecture,
+			HookType:    hooks.PostGenerate,
+		}
+		if err := s.runner.Fire(hooks.PostGenerate, envCtx, cwd); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 // GenerateCRUD generates the full structure for a CRUD entity
 func (s *Scaffolder) GenerateCRUD(name string) error {
+	// Fire pre-generate hook before any work.
+	if s.runner != nil {
+		cwd, _ := os.Getwd()
+		envCtx := hooks.EnvContext{
+			ProjectName: s.config.ProjectName,
+			ProjectPath: cwd,
+			Arch:        s.config.Architecture,
+			HookType:    hooks.PreGenerate,
+		}
+		if err := s.runner.Fire(hooks.PreGenerate, envCtx, cwd); err != nil {
+			return err
+		}
+	}
+
 	data := struct {
 		ui.ProjectConfig
 		EntityName string
@@ -496,6 +603,21 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 	} else {
 		fmt.Println("📍 Remember to register the routes in your main router.")
 	}
+
+	// Fire post-generate hook after all work completes (including routes registry).
+	if s.runner != nil {
+		cwd, _ := os.Getwd()
+		envCtx := hooks.EnvContext{
+			ProjectName: s.config.ProjectName,
+			ProjectPath: cwd,
+			Arch:        s.config.Architecture,
+			HookType:    hooks.PostGenerate,
+		}
+		if err := s.runner.Fire(hooks.PostGenerate, envCtx, cwd); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

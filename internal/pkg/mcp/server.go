@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"go-arch/internal/pkg/hooks"
 	"go-arch/internal/pkg/scaffold"
 	"go-arch/internal/pkg/validator"
 	"go-arch/internal/ui"
@@ -308,7 +309,12 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			UseTemplHTMX:         args.UseTemplHTMX,
 		}
 
-		scaffolder := scaffold.NewScaffolder(cfg)
+		hooksCfg, _ := hooks.Load(hooks.ResolveConfigPath())
+		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
+		scaffolder := scaffold.NewScaffolder(cfg,
+			scaffold.WithRunner(runner),
+			scaffold.WithVersion(Version),
+		)
 		if err := scaffolder.Execute(); err != nil {
 			sendToolResult(id, fmt.Sprintf("Error building project: %v", err), true)
 			return
@@ -355,7 +361,9 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			UseTemplHTMX: viper.GetBool("use_templ_htmx"),
 		}
 
-		scaffolder := scaffold.NewScaffolder(cfg)
+		hooksCfg, _ := hooks.Load(hooks.ResolveConfigPath())
+		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
+		scaffolder := scaffold.NewScaffolder(cfg, scaffold.WithRunner(runner))
 		var err error
 		if args.Type == "crud" {
 			err = scaffolder.GenerateCRUD(args.Name)
