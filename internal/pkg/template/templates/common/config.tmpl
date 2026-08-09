@@ -4,6 +4,9 @@
 project_name: {{ .ProjectName }}
 module_name: {{ .ModuleName }}
 architecture: {{ .Architecture }}
+{{- if .Template }}
+template: {{ .Template }}
+{{- end }}
 db_driver: {{ .DBDriver }}
 use_docker: {{ .UseDocker }}
 use_observability: {{ .UseObservability }}

@@ -46,4 +46,6 @@ type EnvContext struct {
 	ProjectPath string // absolute project directory path
 	Arch        string // architecture value (Minimalist, Standard, Hexagonal)
 	HookType    Type   // the hook type currently firing (drives HOOK_TYPE env var)
+	PackName    string // pack name when scaffolding from a pack (drives PACK_NAME)
+	PackVersion string // pack version when scaffolding from a pack (drives PACK_VERSION)
 }

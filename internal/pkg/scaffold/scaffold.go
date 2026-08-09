@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"go-arch/internal/pkg/hooks"
+	"go-arch/internal/pkg/packs"
 	"go-arch/internal/pkg/template"
 	"go-arch/internal/ui"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,9 +19,10 @@ import (
 type Scaffolder struct {
 	engine   *template.Engine
 	config   *ui.ProjectConfig
-	manifest *Manifest     // lazy-loaded via ensureManifest
-	runner   *hooks.Runner // lifecycle hooks runner (nil = no hooks)
-	version  string        // CLI/MCP version — written to .go-arch.yaml during Execute
+	manifest *Manifest       // lazy-loaded via ensureManifest
+	runner   *hooks.Runner   // lifecycle hooks runner (nil = no hooks)
+	version  string          // CLI/MCP version — written to .go-arch.yaml during Execute
+	packInfo *packs.PackInfo // pre-resolved pack info (nil when no --template)
 }
 
 // ScaffoldOption configures optional behaviour for a Scaffolder.
@@ -36,14 +39,34 @@ func WithVersion(v string) ScaffoldOption {
 	return func(s *Scaffolder) { s.version = v }
 }
 
+// WithPackInfo injects a pre-resolved pack for pack-scoped scaffolding.
+// When non-nil, Execute dispatches to scaffoldPack instead of the arch switch.
+func WithPackInfo(p packs.PackInfo) ScaffoldOption {
+	return func(s *Scaffolder) { s.packInfo = &p }
+}
+
 func NewScaffolder(config *ui.ProjectConfig, opts ...ScaffoldOption) *Scaffolder {
-	s := &Scaffolder{
-		engine: template.NewEngine(),
-		config: config,
-	}
+	s := &Scaffolder{config: config}
+
+	// Apply options first so packInfo is known before engine construction.
 	for _, opt := range opts {
 		opt(s)
 	}
+
+	// Build engine options: pack info drives pack-scoped template resolution.
+	var engineOpts []template.EngineOption
+	if s.packInfo != nil {
+		// Use the parent of the pack dir as the packs base so the engine
+		// can resolve templates via the pack's templates/ subtree.
+		// Engine expects: <packsDir>/<name>@<version>/templates/<path>
+		packsBase := filepath.Dir(s.packInfo.Dir) // parent of express@1.0.0/
+		engineOpts = append(engineOpts,
+			template.WithPacksDir(packsBase),
+			template.WithPack(s.packInfo.Manifest.Name, s.packInfo.Manifest.Version),
+		)
+	}
+	s.engine = template.NewEngine(engineOpts...)
+
 	return s
 }
 
@@ -74,7 +97,7 @@ func (s *Scaffolder) ensureManifest() (*Manifest, error) {
 // Called AFTER successful write in createFile / createBinaryFile.
 // Manifest save failure is NON-FATAL: log to stderr and continue.
 // The scaffold write already succeeded; the manifest is a secondary index.
-func (s *Scaffolder) recordManifest(targetPath, templatePath string, origin Origin, metadata map[string]string) {
+func (s *Scaffolder) recordManifest(targetPath, templatePath string, origin Origin, metadata map[string]string, source string) {
 	m, err := s.ensureManifest()
 	if err != nil {
 		recordManifestWarning("manifest load failed: %v", err)
@@ -91,6 +114,7 @@ func (s *Scaffolder) recordManifest(targetPath, templatePath string, origin Orig
 		SHA256:       hash,
 		Origin:       origin,
 		TemplatePath: templatePath,
+		Source:       source,
 		Metadata:     metadata,
 	})
 	if err := m.Save(); err != nil {
@@ -112,10 +136,17 @@ func (s *Scaffolder) Execute() error {
 			ProjectPath: cwd,
 			Arch:        s.config.Architecture,
 			HookType:    hooks.PreNew,
+			PackName:    s.packName(),
+			PackVersion: s.packVersion(),
 		}
 		if err := s.runner.Fire(hooks.PreNew, envCtx, cwd); err != nil {
 			return err
 		}
+	}
+
+	// PACK BRANCH — dispatch before arch switch (G2).
+	if s.packInfo != nil {
+		return s.executePack(cwd)
 	}
 
 	fmt.Printf("🏗️ Creating project '%s' with %s architecture...\n", s.config.ProjectName, s.config.Architecture)
@@ -185,7 +216,7 @@ func (s *Scaffolder) createFile(path string, templatePath string, data interface
 		return err
 	}
 
-	s.recordManifest(path, templatePath, OriginScaffold, nil)
+	s.recordManifest(path, templatePath, OriginScaffold, nil, "")
 	return nil
 }
 
@@ -205,7 +236,7 @@ func (s *Scaffolder) createBinaryFile(targetPath, embeddedPath string) error {
 	if err := os.WriteFile(full, data, 0644); err != nil {
 		return err
 	}
-	s.recordManifest(targetPath, embeddedPath, OriginBinary, nil)
+	s.recordManifest(targetPath, embeddedPath, OriginBinary, nil, "")
 	return nil
 }
 
@@ -498,7 +529,7 @@ func (s *Scaffolder) GenerateComponent(compType, name string, opts ...GenerateOp
 	// Re-record with correct origin (upsert wins over the OriginScaffold
 	// that createFile wrote). Non-fatal if manifest operations fail.
 	meta := map[string]string{"entity_name": name}
-	s.recordManifest(targetPath, templatePath, OriginComponent, meta)
+	s.recordManifest(targetPath, templatePath, OriginComponent, meta, "")
 
 	// Upsert route if provided and web project
 	if cfg.routePattern != "" && s.config.UseTemplHTMX {
@@ -583,7 +614,7 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 		// Re-record with OriginCrud (upsert wins over OriginScaffold from createFile).
 		// Non-fatal if manifest operations fail.
 		meta := map[string]string{"entity_name": name}
-		s.recordManifest(path, tmpl, OriginCrud, meta)
+		s.recordManifest(path, tmpl, OriginCrud, meta, "")
 	}
 
 	fmt.Println("\n✅ CRUD generated successfully.")
@@ -671,8 +702,137 @@ func (s *Scaffolder) renderRoutesRegistry() error {
 		return err
 	}
 
-	s.recordManifest(targetPath, templatePath, OriginComponent, nil)
+	s.recordManifest(targetPath, templatePath, OriginComponent, nil, "")
 	return nil
+}
+
+// packName returns the pack manifest name or empty string when no pack is active.
+func (s *Scaffolder) packName() string {
+	if s.packInfo == nil {
+		return ""
+	}
+	return s.packInfo.Manifest.Name
+}
+
+// packVersion returns the pack manifest version or empty string when no pack is active.
+func (s *Scaffolder) packVersion() string {
+	if s.packInfo == nil {
+		return ""
+	}
+	return s.packInfo.Manifest.Version
+}
+
+// executePack handles the pack-scoped scaffold path: scaffoldPack, hooks, version.
+func (s *Scaffolder) executePack(cwd string) error {
+	fmt.Printf("🏗️ Creating project '%s' from pack '%s'...\n",
+		s.config.ProjectName, s.packInfo.Manifest.Name)
+
+	if err := s.scaffoldPack(); err != nil {
+		return err
+	}
+
+	projDir := filepath.Join(cwd, s.manifestDir())
+	if s.version != "" {
+		_ = WriteVersionField(filepath.Join(projDir, ".go-arch.yaml"), s.version)
+	}
+
+	// Fire post-new hook with pack env vars.
+	if s.runner != nil {
+		envCtx := hooks.EnvContext{
+			ProjectName: s.config.ProjectName,
+			ProjectPath: projDir,
+			Arch:        s.config.Architecture,
+			HookType:    hooks.PostNew,
+			PackName:    s.packName(),
+			PackVersion: s.packVersion(),
+		}
+		if err := s.runner.Fire(hooks.PostNew, envCtx, projDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// scaffoldPack walks the pack's templates/ tree, maps templates/<path>.tmpl →
+// target <path> (G2 convention), creates files via createFile, copies binary
+// assets declared in the manifest, and records manifest entries with
+// pack source provenance.
+func (s *Scaffolder) scaffoldPack() error {
+	p := s.packInfo
+	source := fmt.Sprintf("pack:%s@%s", p.Manifest.Name, p.Manifest.Version)
+
+	// 1. Create base directory
+	if err := os.MkdirAll(s.manifestDir(), 0755); err != nil {
+		return err
+	}
+
+	// 2. Create layout directories from manifest
+	for _, layoutDir := range p.Manifest.Layout {
+		if err := os.MkdirAll(filepath.Join(s.manifestDir(), layoutDir), 0755); err != nil {
+			return err
+		}
+	}
+
+	// 3. Walk templates/ tree — strip .tmpl extension for target path
+	templatesRoot := filepath.Join(p.Dir, "templates")
+	if err := fs.WalkDir(os.DirFS(templatesRoot), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		// G2 convention: templates/<path>.tmpl → target <path>
+		if !strings.HasSuffix(path, ".tmpl") {
+			return nil // skip non-template files (e.g. binary assets inside templates)
+		}
+
+		targetPath := strings.TrimSuffix(path, ".tmpl")
+		// lookup key is the path WITH .tmpl extension within the pack's templates dir
+		lookupKey := path
+
+		// createFile records with empty source; we override below
+		if err := s.createFile(targetPath, lookupKey, s.config); err != nil {
+			return err
+		}
+		// Override manifest entry with pack source provenance
+		s.recordManifest(targetPath, lookupKey, OriginScaffold, nil, source)
+
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// 4. Copy binary assets declared in manifest (G3)
+	for _, asset := range p.Manifest.BinaryAssets {
+		if err := s.createPackBinary(asset.Target, asset.Source, p.Dir); err != nil {
+			return err
+		}
+		s.recordManifest(asset.Target, "_binary:"+asset.Source, OriginBinary, nil, source)
+	}
+
+	return nil
+}
+
+// createPackBinary copies a binary asset from the pack root to the project.
+// The asset source is relative to the pack directory (e.g. "assets/htmx.min.js").
+// Unlike createFile, this does NOT pass through the template engine — the
+// file is copied verbatim.
+func (s *Scaffolder) createPackBinary(targetPath, relSource, packDir string) error {
+	fullTarget := filepath.Join(s.manifestDir(), targetPath)
+	if err := os.MkdirAll(filepath.Dir(fullTarget), 0755); err != nil {
+		return err
+	}
+
+	srcPath := filepath.Join(packDir, relSource)
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(fullTarget, data, 0644)
 }
 
 // isValidRoutePattern validates "METHOD /path" format.
