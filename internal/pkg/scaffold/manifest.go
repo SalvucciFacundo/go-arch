@@ -26,6 +26,7 @@ type ManifestEntry struct {
 	SHA256       string            `yaml:"sha256"`
 	Origin       Origin            `yaml:"origin"`
 	TemplatePath string            `yaml:"template,omitempty"`
+	Source       string            `yaml:"source,omitempty"`
 	Metadata     map[string]string `yaml:"metadata,omitempty"`
 }
 
