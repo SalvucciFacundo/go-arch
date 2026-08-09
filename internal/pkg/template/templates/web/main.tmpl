@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"{{ .ModuleName }}/internal/handler"
+	"{{ .ModuleName }}/internal/router"
 	{{ if .UseObservability }}
 	"context"
 	"{{ .ModuleName }}/internal/telemetry"
@@ -42,6 +43,8 @@ func main() {
 	mux.HandleFunc("GET /", handler.PageHandler)
 	mux.HandleFunc("POST /counter", handler.CounterHandler)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	router.Register(mux)
 
 	fmt.Println("Listening on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
