@@ -29,11 +29,20 @@ type ManifestEntry struct {
 	Metadata     map[string]string `yaml:"metadata,omitempty"`
 }
 
+// RouteEntry represents one route registration in the manifest.
+type RouteEntry struct {
+	Entity       string `yaml:"entity"`                  // e.g. "User"
+	Handler      string `yaml:"handler"`                 // e.g. "User" (for NewUserHandler)
+	Origin       string `yaml:"origin"`                  // "crud" or "handler"
+	RoutePattern string `yaml:"route_pattern,omitempty"` // e.g. "GET /stats" (handler only)
+}
+
 // Manifest is the ownership source of truth for scaffold-generated files.
 type Manifest struct {
 	Version int                      `yaml:"version"`
 	Files   map[string]ManifestEntry `yaml:"files"`
-	dir     string                   `yaml:"-"` // project root (not serialized)
+	Routes  []RouteEntry             `yaml:"routes,omitempty"` // ADDITIVE
+	dir     string                   `yaml:"-"`                // project root (not serialized)
 }
 
 // ManifestPath returns the canonical manifest path for a project root.
@@ -98,6 +107,18 @@ func (m *Manifest) Save() error {
 // Upsert inserts or replaces a manifest entry keyed by path.
 func (m *Manifest) Upsert(entry ManifestEntry) {
 	m.Files[entry.Path] = entry
+}
+
+// UpsertRoute upserts a route entry by entity (dedupe) and saves the manifest.
+func (m *Manifest) UpsertRoute(entry RouteEntry) error {
+	for i, r := range m.Routes {
+		if r.Entity == entry.Entity {
+			m.Routes[i] = entry
+			return m.Save()
+		}
+	}
+	m.Routes = append(m.Routes, entry)
+	return m.Save()
 }
 
 // hashFile computes sha256 hex digest of a file's contents.
