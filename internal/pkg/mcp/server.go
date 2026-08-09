@@ -9,6 +9,8 @@ import (
 	"go-arch/internal/ui"
 	"io"
 	"os"
+	"os/exec"
+	"runtime"
 
 	"github.com/spf13/viper"
 )
@@ -193,6 +195,32 @@ func handleRequest(req *Request) {
 						},
 					},
 				},
+				map[string]interface{}{
+					"name":        "serve_project",
+					"description": "Check how to run the project: validates the go-arch config, detects whether air (hot-reload) is installed, and returns the exact command to run (air, or go run with the architecture-specific main path). Never starts a long-running process.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"projectPath": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
+							},
+						},
+					},
+				},
+				map[string]interface{}{
+					"name":        "setup_environment",
+					"description": "Detect the Go development environment: OS/architecture, whether the go binary is installed, and whether air (hot-reload) is installed. When install is true it installs the missing air binary via go install (no sudo, user-level only); it never installs the Go toolchain itself (that requires sudo and stays a manual decision).",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"install": map[string]interface{}{
+								"type":        "boolean",
+								"description": "When true, install the missing air binary with go install. Default false: only detect and return the exact install commands.",
+							},
+						},
+					},
+				},
 			},
 		})
 	case "tools/call":
@@ -362,6 +390,122 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			return
 		}
 		sendToolResult(id, string(b), false)
+
+	case "serve_project":
+		var args struct {
+			ProjectPath string `json:"projectPath"`
+		}
+		if err := json.Unmarshal(arguments, &args); err != nil {
+			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+
+		if args.ProjectPath != "" {
+			oldWd, err := os.Getwd()
+			if err == nil {
+				defer os.Chdir(oldWd)
+				os.Chdir(args.ProjectPath)
+			}
+		}
+
+		viper.Reset()
+		viper.AddConfigPath(".")
+		viper.SetConfigName(".go-arch")
+		if err := viper.ReadInConfig(); err != nil {
+			sendToolResult(id, fmt.Sprintf("Could not read .go-arch.yaml config. Are you in a go-arch project? Error: %v", err), true)
+			return
+		}
+
+		layout := viper.GetString("architecture")
+		if layout == "" {
+			sendToolResult(id, "No valid architecture configuration found. Are you in the root of a go-arch project?", true)
+			return
+		}
+
+		mainPath := "cmd/api/main.go"
+		if layout == "Minimalist" {
+			mainPath = "main.go"
+		}
+
+		var command string
+		var hotReload bool
+		if _, err := exec.LookPath("air"); err == nil {
+			command = "air"
+			hotReload = true
+		} else {
+			command = "go run " + mainPath
+		}
+
+		result := map[string]interface{}{
+			"architecture": layout,
+			"mainPath":     mainPath,
+			"command":      command,
+			"hotReload":    hotReload,
+			"note":         "MCP tools never start a long-running server. Run this command yourself in a terminal.",
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		sendToolResult(id, string(data), false)
+
+	case "setup_environment":
+		var args struct {
+			Install bool `json:"install"`
+		}
+		if err := json.Unmarshal(arguments, &args); err != nil {
+			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+
+		goInstalled := false
+		if _, err := exec.LookPath("go"); err == nil {
+			goInstalled = true
+		}
+		airInstalled := false
+		if _, err := exec.LookPath("air"); err == nil {
+			airInstalled = true
+		}
+
+		airInstallCommand := "go install github.com/air-verse/air@latest"
+		var goInstallCommand string
+		switch runtime.GOOS {
+		case "linux":
+			goInstallCommand = "Download the official tarball from https://go.dev/dl and run: sudo tar -C /usr/local -xzf go<VERSION>.linux-" + runtime.GOARCH + ".tar.gz"
+		case "windows":
+			goInstallCommand = "Download and run the official MSI from https://go.dev/dl"
+		default:
+			goInstallCommand = "Download the official Go installer from https://go.dev/dl"
+		}
+
+		result := map[string]interface{}{
+			"os":                runtime.GOOS,
+			"arch":              runtime.GOARCH,
+			"goInstalled":       goInstalled,
+			"airInstalled":      airInstalled,
+			"goInstallCommand":  goInstallCommand,
+			"airInstallCommand": airInstallCommand,
+		}
+
+		if args.Install && !airInstalled {
+			cmd := exec.Command("go", "install", "github.com/air-verse/air@latest")
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				result["installStatus"] = "failed"
+				result["installOutput"] = fmt.Sprintf("go install failed: %v — output: %s", err, string(out))
+				result["installCommand"] = airInstallCommand
+			} else {
+				result["installStatus"] = "installed"
+				result["installOutput"] = string(out)
+				result["airInstalled"] = true
+			}
+		} else if args.Install && airInstalled {
+			result["installStatus"] = "already_installed"
+		}
+
+		if !goInstalled {
+			result["goInstallNote"] = "The Go toolchain itself is never installed by this tool (requires sudo and is a manual decision). " + goInstallCommand
+		}
+
+		data, _ := json.MarshalIndent(result, "", "  ")
+		sendToolResult(id, string(data), false)
 
 	default:
 		sendError(id, -32601, "Tool not found", nil)
