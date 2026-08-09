@@ -35,7 +35,23 @@
 
 ## 🚀 Installation
 
-### 📦 Binary Downloads (Recommended)
+### ⚡ Single Command (Recommended)
+
+Install the latest release binary with one command — no build tools required.
+
+**Linux / macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/SalvucciFacundo/go-arch-cli/main/install.sh | bash
+```
+Installs to `/usr/local/bin` (or `~/.local/bin` when you don't have write permission, with PATH guidance). Verifies the SHA-256 checksum before installing.
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/SalvucciFacundo/go-arch-cli/main/install.ps1 | iex
+```
+Installs to `~\.go-arch\bin` and adds it to your user PATH.
+
+### 📦 Binary Downloads
 Download the latest pre-compiled binaries from the [Releases](https://github.com/SalvucciFacundo/go-arch-cli/releases) page.
 
 ### 🐧 Linux (Native Packages)
