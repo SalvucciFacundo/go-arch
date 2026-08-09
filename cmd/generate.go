@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"go-arch/internal/pkg/hooks"
 	"go-arch/internal/pkg/scaffold"
 	"go-arch/internal/ui"
 
@@ -58,7 +59,15 @@ Flags:
 
 		routeFlag, _ := cmd.Flags().GetString("route")
 
-		scaffolder := scaffold.NewScaffolder(config)
+		hooksCfg, loadErr := hooks.Load(hooks.ResolveConfigPath())
+		if loadErr != nil {
+			return oops.
+				Code("hooks_load_failed").
+				Wrap(loadErr)
+		}
+		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
+
+		scaffolder := scaffold.NewScaffolder(config, scaffold.WithRunner(runner))
 		var err error
 		if compType == "crud" {
 			err = scaffolder.GenerateCRUD(name)

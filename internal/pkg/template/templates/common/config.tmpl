@@ -12,3 +12,30 @@ use_grpc: {{ .UseGRPC }}
 use_templ_htmx: {{ .UseTemplHTMX }}
 go_arch_version: {{ .GoArchVersion }}
 generated_at: {{ now }}
+
+# Hooks — optional lifecycle extensibility.
+# Uncomment and customise to run shell commands around scaffold/generate.
+# ⚠  Executable surface: hooks run arbitrary commands with your shell.
+#    Treat .go-arch.yaml like npm scripts or a Makefile — review before
+#    checking it into source control. See docs/hooks.md for details.
+#
+# Supported types: pre-new, post-new, pre-generate, post-generate.
+# Each entry can be a string (shell shorthand) or an object.
+#
+# hooks:
+#   pre-new:
+#     - echo "About to scaffold {{ .ProjectName }}…"
+#   post-new:
+#     - command: go
+#       args: [mod, tidy]
+#       timeout: 60s
+#     - command: git
+#       args: [init]
+#       ignore_failure: true
+#   pre-generate: []
+#   post-generate:
+#     - gofmt -w .
+#     - command: go
+#       args: [vet, ./...]
+#       silent: true
+#       ignore_failure: true
