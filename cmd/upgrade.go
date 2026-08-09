@@ -72,7 +72,7 @@ var upgradeCmd = &cobra.Command{
 
 		cfg := configFromViper(projectName)
 
-		plan, err := scaffold.Upgrade(cfg)
+		plan, err := scaffold.Upgrade(cfg, scaffold.WithResolver(scaffold.DefaultResolver{}))
 		if err != nil {
 			return oops.Code("upgrade_failed").Wrapf(err, "Upgrade classification failed")
 		}
@@ -177,7 +177,7 @@ func displayPlan(w io.Writer, plan *scaffold.UpgradePlan) {
 			}
 		case scaffold.ClassProtected:
 			protected++
-			fmt.Fprintf(w, "🔒 %s: user-modified (protected, skipping)\n", f.Path)
+			fmt.Fprintf(w, "🔒 %s: protected (skipping)\n", f.Path)
 		case scaffold.ClassAbsent:
 			absent++
 			fmt.Fprintf(w, "❌ %s: absent on disk (not recreating)\n", f.Path)

@@ -199,7 +199,7 @@ func Update(ctx context.Context, dl Downloader, name string, confirm func(packNa
 	}
 
 	// Read the sidecar to get the original module ref.
-	sc, err := readSidecar(Path(name, latestVer))
+	sc, err := ReadSidecar(Path(name, latestVer))
 	if err != nil {
 		return nil, fmt.Errorf("reading sidecar for %s@%s: %w", name, latestVer, err)
 	}

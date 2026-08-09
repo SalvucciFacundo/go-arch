@@ -820,6 +820,15 @@ func (s *Scaffolder) scaffoldPack() error {
 // The asset source is relative to the pack directory (e.g. "assets/htmx.min.js").
 // Unlike createFile, this does NOT pass through the template engine — the
 // file is copied verbatim.
+//
+// DESIGN NOTE: Reads directly from the pack directory rather than using
+// engine.ResolveBinary. The pack directory is the authoritative source for
+// pack-declared assets (G3 resolved: "pack binaries at pack root assets/").
+// Using the 4-step chain (local > global > pack > embedded) would add
+// unnecessary indirection for assets that are explicitly declared in the
+// pack manifest. ResolveBinary remains available for callers that need the
+// full chain resolution (e.g. engine-level testing), but the pack-scaffold
+// path intentionally bypasses it.
 func (s *Scaffolder) createPackBinary(targetPath, relSource, packDir string) error {
 	fullTarget := filepath.Join(s.manifestDir(), targetPath)
 	if err := os.MkdirAll(filepath.Dir(fullTarget), 0755); err != nil {
