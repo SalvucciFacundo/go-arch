@@ -85,10 +85,10 @@ Files: `internal/pkg/scaffold/{scaffold,pack_resolver,manifest}.go` + `scaffold_
 
 Files: `internal/pkg/scaffold/{upgrade,upgrade_opts}.go` + `upgrade_test.go`, `docs/packs.md`. Est: ~550. Risk: Medium.
 
-- [ ] 5.1 RED: `upgrade_test.go` — `renderEntry` with `Source: pack:...` reads from synthetic pack dir (bypasses chain); missing pack via injected resolver→PROTECTED + warning naming pack; version removed but newer installed→PROTECTED (no auto-substitute); non-pack entries unchanged
-- [ ] 5.2 GREEN: `upgrade_opts.go` + `upgrade.go` — `UpgradeOption` + `WithResolver(Resolver)`; `Upgrade(cfg, ...UpgradeOption)`; `renderEntry` pack branch: `source` starts `pack:` → resolve via injected resolver → read `packInfo.Dir/templates/<TemplatePath>` directly (no chain fallback); resolve fail → `ClassProtected` + per-entry warning
-- [ ] 5.3 GREEN: `docs/packs.md` — contract v1 schema table, install location, `template` command group, trust warning, four-step lookup, upgrade interaction, v2 deferral
-- [ ] 5.4 Verify: `go test ./...` + `go vet ./...` + gofmt green; tick completed tasks
+- [x] 5.1 RED: `upgrade_test.go` — `renderEntry` with `Source: pack:...` reads from synthetic pack dir (bypasses chain); missing pack via injected resolver→PROTECTED + warning naming pack; version removed but newer installed→PROTECTED (no auto-substitute); non-pack entries unchanged
+- [x] 5.2 GREEN: `upgrade_opts.go` + `upgrade.go` — `UpgradeOption` + `WithResolver(Resolver)`; `Upgrade(cfg, ...UpgradeOption)`; `renderEntry` pack branch: `source` starts `pack:` → resolve via injected resolver → read `packInfo.Dir/templates/<TemplatePath>` directly (no chain fallback); resolve fail → `ClassProtected` + per-entry warning
+- [x] 5.3 GREEN: `docs/packs.md` — contract v1 schema table, install location, `template` command group, trust warning, four-step lookup, upgrade interaction, v2 deferral
+- [x] 5.4 Verify: `go test ./...` + `go vet ./...` + gofmt green; tick completed tasks
 
 ## Commit Plan (work units)
 

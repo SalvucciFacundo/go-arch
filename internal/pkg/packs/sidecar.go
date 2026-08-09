@@ -36,8 +36,10 @@ func writeSidecar(packDir string, s Sidecar) error {
 	return nil
 }
 
-// readSidecar reads and parses pack.json from the given pack directory.
-func readSidecar(packDir string) (Sidecar, error) {
+// ReadSidecar reads and parses pack.json from the given pack directory.
+// Exported so callers (cmd, mcp) can inspect the HooksEnabled flag
+// before building a pack-scoped hooks runner.
+func ReadSidecar(packDir string) (Sidecar, error) {
 	var s Sidecar
 	path := filepath.Join(packDir, packJSONFile)
 	data, err := os.ReadFile(path)

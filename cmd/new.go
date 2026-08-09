@@ -83,7 +83,10 @@ func runNewWithTemplate(projectName, templateRef string) error {
 
 	packInfo, err := resolvePackForNew(name, version)
 	if err != nil {
-		return err
+		return oops.
+			Code("pack_not_installed").
+			Hint(`Run "go-arch template install <module>@<version>" to install this pack.`).
+			Errorf("pack %q is not installed; run \"go-arch template install <module>@<version>\" to install it", name)
 	}
 
 	// G4: empty-templates check BEFORE any directory is created.
@@ -93,11 +96,25 @@ func runNewWithTemplate(projectName, templateRef string) error {
 
 	cfg := newPackDefaults(projectName, packInfo.Manifest.Name)
 
+	// Build hooks runner: user hooks (global config) merged with pack hooks
+	// (when enabled via the sidecar's HooksEnabled flag).
 	hooksCfg, err := hooks.Load(hooks.ResolveConfigPath())
 	if err != nil {
 		return oops.
 			Code("hooks_load_failed").
 			Wrap(err)
+	}
+
+	// Pack hooks: honor the sidecar's HooksEnabled flag set at install time.
+	if len(packInfo.Manifest.Hooks) > 0 {
+		sc, scErr := packs.ReadSidecar(packInfo.Dir)
+		if scErr == nil && sc.HooksEnabled {
+			// Merge pack hooks into the user config. User hooks already loaded
+			// above (empty config when no user file exists).
+			for hookType, entries := range packInfo.Manifest.Hooks {
+				hooksCfg.Hooks[hookType] = append(hooksCfg.Hooks[hookType], entries...)
+			}
+		}
 	}
 	runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
 	scaffolder := scaffold.NewScaffolder(cfg,

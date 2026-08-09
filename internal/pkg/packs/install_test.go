@@ -1,10 +1,15 @@
 package packs
 
 import (
+	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -623,5 +628,186 @@ func TestUpdate_RePromptHooks(t *testing.T) {
 	sidecar := readSidecarFile(t, Path("express", "1.1.0"))
 	if !sidecar.HooksEnabled {
 		t.Error("sidecar HooksEnabled should be true after accepting hooks in update")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Network-gated offline cached install test (RealDownloader)
+// ---------------------------------------------------------------------------
+
+// seedModuleCache creates a minimal Go module cache entry under gomodcache
+// for module@version. It writes the extracted module directory and the cache
+// download files so that go mod download can resolve the module via a
+// file:// proxy with zero network.
+//
+// Go's proxy protocol first resolves the user-supplied version (e.g. "1.0.0")
+// via the .info file, then fetches the canonical version files (e.g. "v1.0.0.*")
+// using the Version field from the .info JSON. We seed BOTH sets.
+func seedModuleCache(t *testing.T, gomodcache, module, version string) string {
+	t.Helper()
+
+	// Canonical form with "v" prefix for the extracted directory.
+	canonical := "v" + version
+	extractedDir := filepath.Join(gomodcache, module+"@"+canonical)
+
+	// --- extracted module directory ---
+	if err := os.MkdirAll(filepath.Join(extractedDir, "templates", "common"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	goMod := fmt.Sprintf("module %s\n\ngo 1.21\n", module)
+	if err := os.WriteFile(filepath.Join(extractedDir, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifestYAML := `contract_version: 1
+name: testcache
+version: ` + version + `
+`
+	if err := os.WriteFile(filepath.Join(extractedDir, "go-arch.yaml"), []byte(manifestYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(extractedDir, "templates", "common", "hello.tmpl"),
+		[]byte("// {{.ProjectName}}"),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// --- cache download files ---
+	cacheDir := filepath.Join(gomodcache, "cache", "download", module, "@v")
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Canonical-version files (.mod, .zip, .ziphash) — Go fetches these
+	// after resolving the canonical version from the .info file.
+	if err := os.WriteFile(filepath.Join(cacheDir, canonical+".mod"), []byte(goMod), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	infoJSON := fmt.Sprintf(`{"Version":"%s","Time":"2025-01-01T00:00:00Z"}`, canonical)
+
+	// .zip — archive/zip of the extracted directory.
+	zipPath := filepath.Join(cacheDir, canonical+".zip")
+	if err := createModuleZip(extractedDir, zipPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// .ziphash — Go module sum hash: "h1:" + base64(raw-sha256).
+	zipData, err := os.ReadFile(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.Sum256(zipData)
+	ziphash := "h1:" + base64.StdEncoding.EncodeToString(h[:])
+	if err := os.WriteFile(filepath.Join(cacheDir, canonical+".ziphash"), []byte(ziphash), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// User-supplied-version .info — Go uses this for initial resolution
+	// (e.g. "go mod download mod@1.0.0" queries "@v/1.0.0.info" first).
+	if err := os.WriteFile(filepath.Join(cacheDir, version+".info"), []byte(infoJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	return extractedDir
+}
+
+// createModuleZip creates a zip file at dst from the contents of root.
+// It preserves directory structure and file modes.
+func createModuleZip(root, dst string) error {
+	f, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	w := zip.NewWriter(f)
+	defer w.Close()
+
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+
+		hdr, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.ToSlash(rel) // zip uses forward slashes
+		if info.IsDir() {
+			hdr.Name += "/"
+		} else {
+			hdr.Method = zip.Deflate
+		}
+
+		w, err := w.CreateHeader(hdr)
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(data)
+		return err
+	})
+}
+
+// TestInstall_OfflineCached skips during -short (network-gated) and when
+// go is not available. It seeds GOMODCACHE, sets GOPROXY=off, and verifies
+// RealDownloader resolves the module from the local cache with zero network.
+func TestInstall_OfflineCached(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network-gated offline-cached test in -short mode")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not available, skipping RealDownloader test")
+	}
+
+	gomodcache := t.TempDir()
+	module := "github.com/org/testcache"
+	version := "1.0.0"
+
+	expectedDir := seedModuleCache(t, gomodcache, module, version)
+
+	// Use file:// proxy pointing to the seeded cache so Go resolves the
+	// module from the local filesystem without network. GOPROXY=off
+	// disables all lookups (including local cache) in Go 1.21+.
+	t.Setenv("GOMODCACHE", gomodcache)
+	t.Setenv("GOPROXY", "file://"+filepath.Join(gomodcache, "cache", "download"))
+	t.Setenv("GONOSUMCHECK", "*")
+	t.Setenv("GONOSUMDB", "*")
+	t.Setenv("GOFLAGS", "-mod=mod")
+
+	ctx := context.Background()
+	dl := RealDownloader{}
+
+	gotDir, err := dl.Download(ctx, module, version)
+	if err != nil {
+		t.Fatalf("RealDownloader.Download from seeded cache failed: %v", err)
+	}
+
+	if gotDir != expectedDir {
+		t.Errorf("Download dir = %q, want %q", gotDir, expectedDir)
+	}
+
+	// Verify the returned directory contains our seeded files.
+	if _, err := os.Stat(filepath.Join(gotDir, "go-arch.yaml")); err != nil {
+		t.Errorf("go-arch.yaml missing in returned dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(gotDir, "templates", "common", "hello.tmpl")); err != nil {
+		t.Errorf("hello.tmpl missing in returned dir: %v", err)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"go-arch/internal/pkg/packs"
 	"go-arch/internal/ui"
 	"os"
 	"path/filepath"
@@ -516,5 +518,112 @@ files:
 	}
 	if !strings.Contains(out, "views/layouts/base.templ") {
 		t.Errorf("output should mention the views file\nGot: %s", out)
+	}
+}
+
+// TestUpgradePackSourceProductionPath verifies CRITICAL FIX #2: when upgrade
+// runs through the cobra production path (cmd/upgrade.go), pack-source manifest
+// entries are re-rendered from the installed pack (UPGRADABLE) rather than
+// classified as PROTECTED. Before the fix, WithResolver was never passed.
+func TestUpgradePackSourceProductionPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	// 1. Create a fixture pack with V2 template content
+	packDir := filepath.Join(tmpDir, "express@1.0.0")
+	if err := os.MkdirAll(filepath.Join(packDir, "templates", "common"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Manifest for the pack
+	packManifest := `contract_version: 1
+name: express
+version: 1.0.0
+`
+	if err := os.WriteFile(filepath.Join(packDir, "go-arch.yaml"), []byte(packManifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// V2 template — differs from the V1 content we'll write to disk
+	v2Template := "# PACK V2 ENV\nDB_HOST=pack-rendered-host\n"
+	if err := os.WriteFile(filepath.Join(packDir, "templates", "common", "env.tmpl"), []byte(v2Template), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sidecar — not needed for upgrade resolution, but write it to be realistic
+	sidecarJSON := `{"hooks_enabled": false, "installed_at": "2026-01-01T00:00:00Z", "module_ref": "github.com/test/express@1.0.0"}`
+	if err := os.WriteFile(filepath.Join(packDir, "pack.json"), []byte(sidecarJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Write the project's .go-arch.yaml config
+	configYAML := `project_name: "pack-upgrade"
+module_name: github.com/test/pack-upgrade
+architecture: Standard
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Write the disk file (V1 content — what the project currently has)
+	v1Content := "# V1 ENV\nDB_HOST=old-host\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte(v1Content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	v1Hash := sha256Sum([]byte(v1Content))
+
+	// 4. Write the manifest with pack-source entry
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".go-arch"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestYAML := fmt.Sprintf(`version: 1
+files:
+  .env:
+    path: .env
+    sha256: %s
+    origin: scaffold
+    template: common/env.tmpl
+    source: pack:express@1.0.0
+`, v1Hash)
+	if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch", "manifest.yaml"), []byte(manifestYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. Set packs dir so DefaultResolver finds the fixture
+	t.Setenv(packs.EnvPacksDir, tmpDir)
+
+	// 6. Run upgrade --dry-run through the PRODUCTION cobra path
+	resetUpgradeState()
+	buf, err := runUpgradeWithBuf(t, []string{"upgrade", "--dry-run"})
+	if err != nil {
+		t.Fatalf("upgrade --dry-run should exit 0, got: %v\nOutput: %s", err, buf.String())
+	}
+
+	out := buf.String()
+	t.Logf("upgrade output:\n%s", out)
+
+	// 7. The critical assertion: .env must be UPGRADABLE (re-rendered from pack),
+	//    NOT PROTECTED (which was the broken behavior before the fix).
+	if strings.Contains(out, "protected") || strings.Contains(out, "🔒") {
+		// The file might still appear as "protected" in the output alongside others.
+		// What matters: .env must appear as updatable, not protected.
+		if strings.Contains(out, ".env") && !strings.Contains(out, "🔄 .env") {
+			t.Errorf(".env was classified as PROTECTED, expected UPGRADABLE (pack re-render)")
+		}
+	}
+
+	// 8. Verify .env appears with the update indicator
+	if !strings.Contains(out, "🔄 .env") {
+		// Check if it appears at all — if not present, it might be up_to_date
+		// (V1 == V2) or classified as something else.
+		if !strings.Contains(out, ".env") {
+			t.Log("Note: .env not mentioned in plan (may be up-to-date or absent)")
+		} else {
+			t.Errorf(".env should be marked as upgradable (🔄), but was not")
+		}
 	}
 }

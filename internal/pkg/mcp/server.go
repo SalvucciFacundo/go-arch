@@ -368,6 +368,16 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			sendToolResult(id, fmt.Sprintf("Failed to load hooks config: %v", hErr), true)
 			return
 		}
+
+		// Pack hooks: honor the sidecar's HooksEnabled flag set at install time.
+		if packInfo != nil && len(packInfo.Manifest.Hooks) > 0 {
+			sc, scErr := packs.ReadSidecar(packInfo.Dir)
+			if scErr == nil && sc.HooksEnabled {
+				for hookType, entries := range packInfo.Manifest.Hooks {
+					hooksCfg.Hooks[hookType] = append(hooksCfg.Hooks[hookType], entries...)
+				}
+			}
+		}
 		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
 
 		var scaffOpts []scaffold.ScaffoldOption
@@ -660,7 +670,7 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			UseTemplHTMX:         viper.GetBool("use_templ_htmx"),
 		}
 
-		plan, err := scaffold.Upgrade(cfg)
+		plan, err := scaffold.Upgrade(cfg, scaffold.WithResolver(scaffold.DefaultResolver{}))
 		if err != nil {
 			sendToolResult(id, fmt.Sprintf("Upgrade failed: %v", err), true)
 			return
