@@ -47,10 +47,10 @@ No threat matrix — no RED tests.
 
 ## Phase 4: MCP Tool
 
-- [ ] 4.1 `server.go` (MOD): upgrade_project in tools/list (projectPath, apply — NO dryRun per corrected design)
-- [ ] 4.2 `server.go` (MOD): handleToolCall — chdir+viper.Reset, Upgrade, Apply if apply, WriteVersionField real Version (wired, not "mcp"), JSON plan
-- [ ] 4.3 `server_test.go` (MOD): dry-run returns plan JSON + no writes; bare apply:true commits
+- [x] 4.1 `server.go` (MOD): upgrade_project in tools/list (projectPath, apply — NO dryRun per corrected design)
+- [x] 4.2 `server.go` (MOD): handleToolCall — chdir+viper.Reset, Upgrade, Apply if apply, WriteVersionField real Version (wired, not "mcp"), JSON plan
+- [x] 4.3 `server_test.go` (MOD): dry-run returns plan JSON + no writes; bare apply:true commits
 
 ## Phase 5: Verification
 
-- [ ] 5.1 `go test ./...`, `go vet ./...`, gofmt clean, `golangci-lint v1.64.8 run ./...` exit 0
+- [x] 5.1 `go test ./...`, `go vet ./...`, gofmt clean, `golangci-lint v1.64.8 run ./...` exit 0
