@@ -31,7 +31,12 @@ var newCmd = &cobra.Command{
 
 		// 2. Execute the scaffolding
 		ui.Info(fmt.Sprintf("Creating project '%s'...", config.ProjectName))
-		hooksCfg, _ := hooks.Load(hooks.ResolveConfigPath())
+		hooksCfg, err := hooks.Load(hooks.ResolveConfigPath())
+		if err != nil {
+			return oops.
+				Code("hooks_load_failed").
+				Wrap(err)
+		}
 		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
 		scaffolder := scaffold.NewScaffolder(config,
 			scaffold.WithRunner(runner),
