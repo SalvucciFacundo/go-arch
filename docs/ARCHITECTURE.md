@@ -61,7 +61,8 @@ When you run a command like `generate crud`, the CLI searches for templates in a
 
 1.  **Local Project**: `.go-arch/templates/` inside your project.
 2.  **Global User**: `~/.go-arch/templates/` in your Home directory.
-3.  **Embedded**: Built-in defaults inside the binary.
+3.  **Installed Packs**: `~/.go-arch/packs/<name>@<version>/templates/` (when `new --template` is used; see `template install`).
+4.  **Embedded**: Built-in defaults inside the binary.
 
 ### Available Template Helpers
 When creating custom templates, you can use these built-in functions to manipulate strings and data:

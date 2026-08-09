@@ -134,7 +134,8 @@ go-arch version
 You can override any built-in template with your own. The CLI follows this lookup order:
 1. **Local**: `./.go-arch/templates/<path>`
 2. **Global**: `~/.go-arch/templates/<path>`
-3. **Embedded**: Built-in defaults.
+3. **Installed Packs**: `~/.go-arch/packs/<name>@<version>/templates/<path>` (when `new --template` is used)
+4. **Embedded**: Built-in defaults.
 
 Check the [**Architecture Guide**](./docs/ARCHITECTURE.md) for detailed mapping and customization instructions.
 

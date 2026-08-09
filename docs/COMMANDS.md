@@ -53,7 +53,49 @@ Runs your application with a developer-first approach.
 
 ---
 
-## 5. `check` 🛡️
+## 5. `template` 📦
+**Usage**: `go-arch template <install|list|remove|update>`
+
+Manages installable template packs from Go module proxies. Packs provide a self-contained set of templates that define the project layout, files, and optional hooks.
+
+### 5a. `template install`
+**Usage**: `go-arch template install <module>[@<version>]`
+
+Fetches a pack module via `go mod download -json`, validates the manifest, and materializes it under `~/.go-arch/packs/<name>@<version>/`. If no `@version` is provided, `@latest` is used.
+
+```bash
+go-arch template install github.com/org/go-arch-express@1.0.0
+```
+
+If the pack declares hooks, a trust warning is printed and the CLI prompts for explicit confirmation before enabling them.
+
+### 5b. `template list`
+**Usage**: `go-arch template list`
+
+Lists all installed packs sorted by name:
+```bash
+go-arch template list
+#   echo@0.5.0
+#   express@1.0.0
+```
+
+### 5c. `template remove`
+**Usage**: `go-arch template remove <name>[@<version>]`
+
+Removes an installed pack. Without `@version`, the latest installed version is removed. With a specific version, only that version is removed.
+
+### 5d. `template update`
+**Usage**: `go-arch template update <name>`
+
+Re-fetches the `@latest` version of a pack. Previously installed older versions are preserved. If the new version declares hooks, the trust warning is re-prompted.
+
+```bash
+go-arch template update express
+```
+
+---
+
+## 6. `check` 🛡️
 **Usage**: `go-arch check`
 
 Validates the project's **Architectural Health**. This command is intended to be used during development and in **CI/CD pipelines**.
@@ -63,7 +105,7 @@ Validates the project's **Architectural Health**. This command is intended to be
 
 ---
 
-## 6. `mcp` 🤖
+## 7. `mcp` 🤖
 **Usage**: `go-arch mcp`
 
 Launches the Model Context Protocol (MCP) server over standard I/O (stdio).
@@ -88,7 +130,7 @@ Every CLI command has a corresponding MCP tool for agents:
 
 ---
 
-## 7. `doctor` 🩺
+## 8. `doctor` 🩺
 **Usage**: `go-arch doctor`
 
 Runs environment diagnostics and reports issues found:
@@ -102,14 +144,14 @@ Exits non-zero when any check fails, so it is safe to use in scripts and CI.
 
 ---
 
-## 8. `version` 🏷️
+## 9. `version` 🏷️
 **Usage**: `go-arch version`
 
 Prints the build version. When built via GoReleaser (tagged release), the version is injected automatically. Local development builds print `dev`.
 
 ---
 
-## 9. Metadata System (`.go-arch.yaml`) 📄
+## 10. Metadata System (`.go-arch.yaml`) 📄
 
 The CLI is stateless, meaning it doesn't store your project data in a database. Instead, it uses this YAML file as the **Source of Truth**.
 - **Architecture Locking**: Prevents generating components that don't match the project's initial architecture.
