@@ -57,7 +57,7 @@ func Install(ctx context.Context, dl Downloader, module, version string, confirm
 		InstalledAt: nowUTC(),
 		ModuleRef:   modRef,
 	}
-	if len(m.Hooks) > 0 {
+	if len(m.Hooks) > 0 || anyGeneratorRunsCommands(m) {
 		accepted, err := confirm(m.Name)
 		if err != nil {
 			return nil, fmt.Errorf("trust prompt: %w", err)
@@ -235,4 +235,15 @@ func Update(ctx context.Context, dl Downloader, name string, confirm func(packNa
 // nowUTC returns the current time in UTC. Extracted for testability.
 var nowUTC = func() time.Time {
 	return time.Now().UTC()
+}
+
+// anyGeneratorRunsCommands returns true when any generator in the manifest
+// declares run: steps or pre:/post: hooks that could execute commands.
+func anyGeneratorRunsCommands(m *Manifest) bool {
+	for _, g := range m.Generators {
+		if g.RunsCommands() {
+			return true
+		}
+	}
+	return false
 }
