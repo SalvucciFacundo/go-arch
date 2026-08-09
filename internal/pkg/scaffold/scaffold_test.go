@@ -60,8 +60,10 @@ func TestScaffolder_Layouts(t *testing.T) {
 			defer os.RemoveAll(tempDir)
 
 			oldWd, _ := os.Getwd()
-			os.Chdir(tempDir)
-			defer os.Chdir(oldWd)
+			if err := os.Chdir(tempDir); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = os.Chdir(oldWd) }()
 
 			config := &ui.ProjectConfig{
 				ProjectName:      "TestApp",

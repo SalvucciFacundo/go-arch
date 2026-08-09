@@ -16,7 +16,7 @@ var RootCmd = &cobra.Command{
 	Use:           "go-arch",
 	Short:         "A CLI tool to scaffold Go projects with clean architecture",
 	Long:          `go-arch is a CLI library for Go that empowers developers to create projects with hexagonal or minimalist architecture.`,
-	SilenceUsage:  true,  // Samber Standard: We handle error display
+	SilenceUsage:  true, // Samber Standard: We handle error display
 	SilenceErrors: true, // Samber Standard: Avoid duplicate error logs
 }
 
@@ -35,7 +35,7 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.go-arch.yaml)")
 
 	// Bind persistent flags to viper
-	viper.BindPFlag("config", RootCmd.PersistentFlags().Lookup("config"))
+	_ = viper.BindPFlag("config", RootCmd.PersistentFlags().Lookup("config"))
 }
 
 func initConfig() {

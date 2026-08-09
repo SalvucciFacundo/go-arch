@@ -1,0 +1,11 @@
+run:
+  timeout: 5m
+
+linters:
+  enable: []
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
