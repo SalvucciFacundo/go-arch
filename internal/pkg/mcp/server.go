@@ -15,6 +15,10 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Version is the go-arch CLI version, set from main via GoReleaser or explicitly.
+// The mcp package uses its own Version to avoid an import cycle with cmd.
+var Version = "dev"
+
 // Request representation for JSON-RPC 2.0
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -217,6 +221,23 @@ func handleRequest(req *Request) {
 							"install": map[string]interface{}{
 								"type":        "boolean",
 								"description": "When true, install the missing air binary with go install. Default false: only detect and return the exact install commands.",
+							},
+						},
+					},
+				},
+				map[string]interface{}{
+					"name":        "upgrade_project",
+					"description": "Propagate embedded template changes to a previously generated project. Returns a classified plan (upgradable / protected / absent). Dry-run by default — mutates nothing. Set apply: true to commit changes.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"projectPath": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: Path to the project root containing .go-arch.yaml",
+							},
+							"apply": map[string]interface{}{
+								"type":        "boolean",
+								"description": "When true, apply all upgradable changes and return the applied plan. Default: false.",
 							},
 						},
 					},
@@ -515,6 +536,66 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 
 		data, _ := json.MarshalIndent(result, "", "  ")
 		sendToolResult(id, string(data), false)
+
+	case "upgrade_project":
+		var args struct {
+			ProjectPath string `json:"projectPath"`
+			Apply       bool   `json:"apply"`
+		}
+		if err := json.Unmarshal(arguments, &args); err != nil {
+			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+
+		if args.ProjectPath != "" {
+			oldWd, err := os.Getwd()
+			if err == nil {
+				if chdirErr := os.Chdir(args.ProjectPath); chdirErr != nil {
+					sendError(id, -32602, "Cannot change to project directory", chdirErr.Error())
+					return
+				}
+				defer func() { _ = os.Chdir(oldWd) }()
+			}
+		}
+
+		viper.Reset()
+		viper.AddConfigPath(".")
+		viper.SetConfigName(".go-arch")
+		if err := viper.ReadInConfig(); err != nil {
+			sendToolResult(id, fmt.Sprintf("Could not read .go-arch.yaml config. Error: %v", err), true)
+			return
+		}
+
+		cfg := &ui.ProjectConfig{
+			ProjectName:          viper.GetString("project_name"),
+			ModuleName:           viper.GetString("module_name"),
+			Architecture:         viper.GetString("architecture"),
+			DBDriver:             viper.GetString("db_driver"),
+			UseDocker:            viper.GetBool("use_docker"),
+			UseObservability:     viper.GetBool("use_observability"),
+			ObservabilityBackend: viper.GetString("observability_backend"),
+			UseGRPC:              viper.GetBool("use_grpc"),
+			UseTemplHTMX:         viper.GetBool("use_templ_htmx"),
+		}
+
+		plan, err := scaffold.Upgrade(cfg)
+		if err != nil {
+			sendToolResult(id, fmt.Sprintf("Upgrade failed: %v", err), true)
+			return
+		}
+
+		if args.Apply {
+			applied, applyErr := plan.Apply()
+			if applyErr != nil {
+				sendToolResult(id, fmt.Sprintf("Apply failed: %v", applyErr), true)
+				return
+			}
+			_ = scaffold.WriteVersionField(".go-arch.yaml", Version)
+			plan.AppliedCount = applied
+		}
+
+		result, _ := json.MarshalIndent(plan, "", "  ")
+		sendToolResult(id, string(result), false)
 
 	default:
 		sendError(id, -32601, "Tool not found", nil)

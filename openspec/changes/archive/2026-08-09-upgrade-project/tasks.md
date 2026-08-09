@@ -1,5 +1,7 @@
 # Tasks: Upgrade Project — Template Propagation via Fingerprint Manifest
 
+> **Status: ARCHIVED** — 2026-08-09. All 19/19 tasks complete. Verify PASS 29/29 after the `--project-path` viper re-read fix (commit `576317c`). Change closed and archived per the SDD archive phase.
+
 ## Review Workload Forecast
 
 Decision needed before apply: No
@@ -47,10 +49,10 @@ No threat matrix — no RED tests.
 
 ## Phase 4: MCP Tool
 
-- [ ] 4.1 `server.go` (MOD): upgrade_project in tools/list (projectPath, apply — NO dryRun per corrected design)
-- [ ] 4.2 `server.go` (MOD): handleToolCall — chdir+viper.Reset, Upgrade, Apply if apply, WriteVersionField real Version (wired, not "mcp"), JSON plan
-- [ ] 4.3 `server_test.go` (MOD): dry-run returns plan JSON + no writes; bare apply:true commits
+- [x] 4.1 `server.go` (MOD): upgrade_project in tools/list (projectPath, apply — NO dryRun per corrected design)
+- [x] 4.2 `server.go` (MOD): handleToolCall — chdir+viper.Reset, Upgrade, Apply if apply, WriteVersionField real Version (wired, not "mcp"), JSON plan
+- [x] 4.3 `server_test.go` (MOD): dry-run returns plan JSON + no writes; bare apply:true commits
 
 ## Phase 5: Verification
 
-- [ ] 5.1 `go test ./...`, `go vet ./...`, gofmt clean, `golangci-lint v1.64.8 run ./...` exit 0
+- [x] 5.1 `go test ./...`, `go vet ./...`, gofmt clean, `golangci-lint v1.64.8 run ./...` exit 0
