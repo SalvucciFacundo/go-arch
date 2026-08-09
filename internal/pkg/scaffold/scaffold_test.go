@@ -1264,6 +1264,920 @@ func TestGenerateComponent_Guards(t *testing.T) {
 	})
 }
 
+// ──────────────────────────────────────────────────────────
+// Phase 2 — route registry & manifestDir (Strict TDD)
+// ──────────────────────────────────────────────────────────
+
+// TestManifestDir_CWD verifies task 2.1: manifestDir() returns "."
+// when a manifest exists in the current working directory.
+func TestManifestDir_CWD(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "manifestdir-cwd-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Create a manifest in CWD to simulate generate context.
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ManifestPath("."), []byte("version: 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "realapp",
+		ModuleName:   "github.com/test/realapp",
+		Architecture: "Standard",
+	}
+	scaffolder := NewScaffolder(config)
+	got := scaffolder.manifestDir()
+	want := "."
+	if got != want {
+		t.Errorf("manifestDir() = %q, want %q", got, want)
+	}
+}
+
+// TestManifestDir_New verifies task 2.1: manifestDir() returns ProjectName
+// when no manifest exists in CWD (new context).
+func TestManifestDir_New(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "manifestdir-new-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// No manifest in CWD → new project context
+	config := &ui.ProjectConfig{
+		ProjectName:  "myapp",
+		ModuleName:   "github.com/test/myapp",
+		Architecture: "Standard",
+	}
+	scaffolder := NewScaffolder(config)
+	got := scaffolder.manifestDir()
+	want := "myapp"
+	if got != want {
+		t.Errorf("manifestDir() = %q, want %q", got, want)
+	}
+}
+
+// TestManifestDir_NestedPathFix verifies task 2.1 (Fix 1): when generate runs
+// in a directory where project_name differs from the actual directory name,
+// files are written to CWD (not nested under project_name).
+func TestManifestDir_NestedPathFix(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "nested-fix-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Set up a real project layout with a manifest and project_name: realapp.
+	// The key bug was that files ended up at realapp/internal/handler/...
+	// when they should be at ./internal/handler/...
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ManifestPath("."), []byte("version: 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "realapp",
+		ModuleName:   "github.com/test/nested",
+		Architecture: "Standard",
+	}
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.GenerateComponent("service", "User")
+	if err != nil {
+		t.Fatalf("GenerateComponent failed: %v", err)
+	}
+
+	// The handler file must be at CWD, NOT nested under realapp/
+	correctPath := filepath.Join(tmpDir, "internal", "service", "User_service.go")
+	if _, err := os.Stat(correctPath); os.IsNotExist(err) {
+		t.Errorf("file should exist at CWD path: %s", correctPath)
+	}
+
+	// The nested path must NOT exist
+	nestedPath := filepath.Join(tmpDir, "realapp", "internal", "service", "User_service.go")
+	if _, err := os.Stat(nestedPath); err == nil {
+		t.Errorf("file should NOT exist at nested path: %s", nestedPath)
+	}
+}
+
+// ──────────────────────────────────────────────────────────
+// Task 2.2 — RoutesData + renderRoutesRegistry (Strict TDD)
+// ──────────────────────────────────────────────────────────
+
+// TestRoutesData_IsStruct verifies that RoutesData is a usable struct
+// embedding ModuleName, Architecture, and Routes fields for the template.
+func TestRoutesData_IsStruct(t *testing.T) {
+	rd := RoutesData{
+		ModuleName:   "github.com/test/app",
+		Architecture: "Standard",
+		Routes: []RouteEntry{
+			{Entity: "User", Handler: "User", Origin: "crud"},
+		},
+	}
+	if rd.ModuleName != "github.com/test/app" {
+		t.Errorf("ModuleName = %q", rd.ModuleName)
+	}
+	if rd.Architecture != "Standard" {
+		t.Errorf("Architecture = %q", rd.Architecture)
+	}
+	if len(rd.Routes) != 1 {
+		t.Errorf("len(Routes) = %d, want 1", len(rd.Routes))
+	}
+}
+
+// TestRenderRoutesRegistry_Standard verifies task 2.2: renderRoutesRegistry
+// creates routes.go with handler.NewUserHandler().Register(mux) for Standard.
+func TestRenderRoutesRegistry_Standard(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "routes-registry-std-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Create a manifest with a CRUD route
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{
+		Version: 1,
+		Files:   make(map[string]ManifestEntry),
+		Routes: []RouteEntry{
+			{Entity: "User", Handler: "User", Origin: "crud"},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/routesapp",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.renderRoutesRegistry()
+	if err != nil {
+		t.Fatalf("renderRoutesRegistry failed: %v", err)
+	}
+
+	content, err := os.ReadFile("internal/router/routes.go")
+	if err != nil {
+		t.Fatalf("routes.go not created: %v", err)
+	}
+
+	contentStr := string(content)
+	if !strings.Contains(contentStr, `handler.NewUserHandler().Register(mux)`) {
+		t.Errorf("routes.go should contain handler.NewUserHandler().Register(mux); got:\n%s", contentStr)
+	}
+	if !strings.Contains(contentStr, `"github.com/test/routesapp/internal/handler"`) {
+		t.Errorf("routes.go should import internal/handler; got:\n%s", contentStr)
+	}
+}
+
+// TestRenderRoutesRegistry_Hexagonal verifies task 2.2: renderRoutesRegistry
+// creates routes.go with adapters.NewUserHandler().Register(mux) for Hexagonal.
+func TestRenderRoutesRegistry_Hexagonal(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "routes-registry-hex-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Create a manifest with a CRUD route
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{
+		Version: 1,
+		Files:   make(map[string]ManifestEntry),
+		Routes: []RouteEntry{
+			{Entity: "User", Handler: "User", Origin: "crud"},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/hexroutes",
+		Architecture: "Hexagonal",
+		UseTemplHTMX: true,
+	}
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.renderRoutesRegistry()
+	if err != nil {
+		t.Fatalf("renderRoutesRegistry failed: %v", err)
+	}
+
+	content, err := os.ReadFile("internal/router/routes.go")
+	if err != nil {
+		t.Fatalf("routes.go not created: %v", err)
+	}
+
+	contentStr := string(content)
+	if !strings.Contains(contentStr, `adapters.NewUserHandler().Register(mux)`) {
+		t.Errorf("routes.go should contain adapters.NewUserHandler().Register(mux); got:\n%s", contentStr)
+	}
+	if !strings.Contains(contentStr, `"github.com/test/hexroutes/internal/adapters"`) {
+		t.Errorf("routes.go should import internal/adapters; got:\n%s", contentStr)
+	}
+}
+
+// TestRenderRoutesRegistry_Deterministic verifies task 2.2: re-rendering
+// with the same manifest produces byte-identical output.
+func TestRenderRoutesRegistry_Deterministic(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "routes-det-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{
+		Version: 1,
+		Files:   make(map[string]ManifestEntry),
+		Routes: []RouteEntry{
+			{Entity: "User", Handler: "User", Origin: "crud"},
+			{Entity: "Order", Handler: "Order", Origin: "handler", RoutePattern: "GET /orders"},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/det",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+	scaffolder := NewScaffolder(config)
+	if err := scaffolder.renderRoutesRegistry(); err != nil {
+		t.Fatalf("first renderRoutesRegistry failed: %v", err)
+	}
+
+	first, err := os.ReadFile("internal/router/routes.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second render must be byte-identical
+	if err := scaffolder.renderRoutesRegistry(); err != nil {
+		t.Fatalf("second renderRoutesRegistry failed: %v", err)
+	}
+	second, err := os.ReadFile("internal/router/routes.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(first, second) {
+		t.Errorf("re-render produced different output\nfirst: %s\nsecond: %s", first, second)
+	}
+}
+
+// TestRenderRoutesRegistry_Empty verifies that empty routes produce a
+// valid routes.go with no imports and empty Register body.
+func TestRenderRoutesRegistry_Empty(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "routes-empty-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{
+		Version: 1,
+		Files:   make(map[string]ManifestEntry),
+		Routes:  []RouteEntry{}, // empty
+		dir:     ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/empty",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+	scaffolder := NewScaffolder(config)
+	if err := scaffolder.renderRoutesRegistry(); err != nil {
+		t.Fatalf("renderRoutesRegistry failed: %v", err)
+	}
+
+	content, err := os.ReadFile("internal/router/routes.go")
+	if err != nil {
+		t.Fatalf("routes.go not created: %v", err)
+	}
+
+	contentStr := string(content)
+	if !strings.Contains(contentStr, "package router") {
+		t.Errorf("routes.go should have package router; got:\n%s", contentStr)
+	}
+	if !strings.Contains(contentStr, "func Register(mux *http.ServeMux) {") {
+		t.Errorf("routes.go should have func Register; got:\n%s", contentStr)
+	}
+	// Empty routes → no import block
+	if strings.Contains(contentStr, "internal/handler") {
+		t.Errorf("empty routes.go should NOT import internal/handler")
+	}
+}
+
+// ──────────────────────────────────────────────────────────
+// Task 2.6 — scaffoldWeb empty routes.go (Strict TDD)
+// ──────────────────────────────────────────────────────────
+
+// TestScaffoldWeb_EmptyRoutesGo verifies task 2.6 (Fix 3):
+// scaffoldWeb creates internal/router/routes.go with empty route list
+// so the project compiles immediately.
+func TestScaffoldWeb_EmptyRoutesGo(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "web-empty-routes-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "WebEmptyRoutes",
+		ModuleName:   "github.com/test/webempty",
+		Architecture: "Minimalist",
+		UseTemplHTMX: true,
+	}
+	scaffolder := NewScaffolder(config)
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// routes.go must exist under the project directory
+	routesPath := filepath.Join(tmpDir, "WebEmptyRoutes", "internal", "router", "routes.go")
+	content, err := os.ReadFile(routesPath)
+	if err != nil {
+		t.Fatalf("routes.go not created: %v", err)
+	}
+
+	contentStr := string(content)
+	if !strings.Contains(contentStr, "package router") {
+		t.Errorf("routes.go should have package router; got:\n%s", contentStr)
+	}
+	if !strings.Contains(contentStr, "func Register(mux *http.ServeMux)") {
+		t.Errorf("routes.go should have func Register; got:\n%s", contentStr)
+	}
+	// Empty list → no import
+	if strings.Contains(contentStr, "internal/handler") {
+		t.Errorf("empty routes.go should NOT import internal/handler")
+	}
+	// Internal router dir must exist
+	routerDir := filepath.Join(tmpDir, "WebEmptyRoutes", "internal", "router")
+	if _, err := os.Stat(routerDir); os.IsNotExist(err) {
+		t.Errorf("internal/router directory not created")
+	}
+}
+
+// TestScaffoldWeb_EmptyRoutesGoCompiles verifies task 2.6 (Fix 3): a
+// non-web project should NOT create routes.go.
+func TestScaffoldWeb_EmptyRoutesGoCompiles(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "web-build-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "WebBuild",
+		ModuleName:   "github.com/test/webbuild",
+		Architecture: "Minimalist",
+		UseTemplHTMX: false,
+	}
+	scaffolder := NewScaffolder(config)
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// Non-web project — routes.go should NOT exist
+	routesPath := filepath.Join(tmpDir, "WebBuild", "internal", "router", "routes.go")
+	if _, err := os.Stat(routesPath); err == nil {
+		t.Errorf("non-web project should NOT have routes.go")
+	}
+}
+
+// ──────────────────────────────────────────────────────────
+// Task 2.3 — GenerateComponent variadic options + WithRoute (Strict TDD)
+// ──────────────────────────────────────────────────────────
+
+// TestGenerateComponent_VariadicBackward verifies task 2.3: existing callers
+// with zero options continue working unchanged.
+func TestGenerateComponent_VariadicBackward(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "var-back-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/varback",
+		Architecture: "Standard",
+	}
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.GenerateComponent("service", "Order")
+	if err != nil {
+		t.Fatalf("GenerateComponent with zero options failed: %v", err)
+	}
+
+	if _, err := os.Stat("internal/service/Order_service.go"); os.IsNotExist(err) {
+		t.Error("expected Order_service.go to be created")
+	}
+}
+
+// TestGenerateComponent_WithRoute_WebScaffoldRequired verifies task 2.3 (Fix 7):
+// handler --route in non-web project returns web_scaffold_required.
+func TestGenerateComponent_WithRoute_WebScaffoldRequired(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "var-wsr-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/varwsr",
+		Architecture: "Standard",
+		UseTemplHTMX: false,
+	}
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.GenerateComponent("handler", "Stats", WithRoute("GET /stats"))
+	if err == nil {
+		t.Fatal("expected error for --route in non-web, got nil")
+	}
+	if code := oopsCode(err); code != "web_scaffold_required" {
+		t.Errorf("expected oops code web_scaffold_required, got %q; err: %v", code, err)
+	}
+}
+
+// TestGenerateComponent_WithRoute_InvalidPattern verifies task 2.3 (Fix 7):
+// handler --route with bad pattern returns invalid_route_pattern.
+func TestGenerateComponent_WithRoute_InvalidPattern(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "var-ip-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/varip",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.GenerateComponent("handler", "X", WithRoute("BADPATTERN"))
+	if err == nil {
+		t.Fatal("expected error for bad pattern, got nil")
+	}
+	if code := oopsCode(err); code != "invalid_route_pattern" {
+		t.Errorf("expected oops code invalid_route_pattern, got %q; err: %v", code, err)
+	}
+}
+
+// TestGenerateComponent_WithRoute_Registers verifies task 2.3 (Fix 5):
+// handler --route "GET /stats" creates routes.go with mux.HandleFunc.
+func TestGenerateComponent_WithRoute_Registers(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "var-reg-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Setup a manifest
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{Version: 1, Files: make(map[string]ManifestEntry), dir: "."}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/reg",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.GenerateComponent("handler", "Stats", WithRoute("GET /stats"))
+	if err != nil {
+		t.Fatalf("GenerateComponent with WithRoute failed: %v", err)
+	}
+
+	// Verify handler file exists
+	if _, err := os.Stat("internal/handler/Stats_handler.go"); os.IsNotExist(err) {
+		t.Error("expected Stats_handler.go to be created")
+	}
+
+	// Verify routes.go has mux.HandleFunc line
+	routesContent, err := os.ReadFile("internal/router/routes.go")
+	if err != nil {
+		t.Fatalf("routes.go not created: %v", err)
+	}
+	routesStr := string(routesContent)
+	if !strings.Contains(routesStr, `mux.HandleFunc("GET /stats"`) {
+		t.Errorf("routes.go should contain mux.HandleFunc for GET /stats; got:\n%s", routesStr)
+	}
+}
+
+// TestGenerateComponent_WithoutRoute_RegistryUnchanged verifies task 2.3:
+// handler without --route leaves routes.go byte-identical.
+func TestGenerateComponent_WithoutRoute_RegistryUnchanged(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "var-noreg-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{Version: 1, Files: make(map[string]ManifestEntry), dir: "."}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/noreg",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+	scaffolder := NewScaffolder(config)
+
+	// Render empty routes.go first to establish baseline
+	if err := scaffolder.renderRoutesRegistry(); err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := os.ReadFile("internal/router/routes.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Generate handler without --route
+	err = scaffolder.GenerateComponent("handler", "Stats")
+	if err != nil {
+		t.Fatalf("GenerateComponent without route failed: %v", err)
+	}
+
+	// routes.go must be byte-identical to baseline
+	after, err := os.ReadFile("internal/router/routes.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(baseline, after) {
+		t.Errorf("routes.go changed after handler generate without --route\nbaseline:\n%s\nafter:\n%s", baseline, after)
+	}
+}
+
+// ──────────────────────────────────────────────────────────
+// Task 2.5 — GenerateCRUD web wiring (Strict TDD)
+// ──────────────────────────────────────────────────────────
+
+// TestGenerateCRUD_WebRegistry verifies task 2.5: GenerateCRUD in web project
+// upserts route and re-renders routes.go with NewXHandler().Register(mux).
+func TestGenerateCRUD_WebRegistry(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "crud-webreg-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{Version: 1, Files: make(map[string]ManifestEntry), dir: "."}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/crudweb",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.GenerateCRUD("User")
+	if err != nil {
+		t.Fatalf("GenerateCRUD failed: %v", err)
+	}
+
+	// routes.go must exist with handler.NewUserHandler().Register(mux)
+	routesContent, err := os.ReadFile("internal/router/routes.go")
+	if err != nil {
+		t.Fatalf("routes.go not created: %v", err)
+	}
+	routesStr := string(routesContent)
+	if !strings.Contains(routesStr, `handler.NewUserHandler().Register(mux)`) {
+		t.Errorf("routes.go should contain handler.NewUserHandler().Register(mux); got:\n%s", routesStr)
+	}
+
+	// Manifest must have the route entry
+	m2, err := LoadManifest(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range m2.Routes {
+		if r.Entity == "User" && r.Origin == "crud" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("manifest should contain User crud route entry")
+	}
+}
+
+// TestGenerateCRUD_NonWeb_HintOnly verifies task 2.5: GenerateCRUD in non-web
+// project does NOT create routes.go.
+func TestGenerateCRUD_NonWeb_HintOnly(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "crud-nonweb-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{Version: 1, Files: make(map[string]ManifestEntry), dir: "."}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/nonweb",
+		Architecture: "Standard",
+		UseTemplHTMX: false,
+	}
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.GenerateCRUD("User")
+	if err != nil {
+		t.Fatalf("GenerateCRUD failed: %v", err)
+	}
+
+	// No routes.go should exist
+	if _, err := os.Stat("internal/router/routes.go"); err == nil {
+		t.Error("non-web project should NOT have routes.go after CRUD")
+	}
+}
+
+// TestGenerateCRUD_Idempotent verifies task 2.5: CRUD twice → one entry.
+func TestGenerateCRUD_Idempotent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "crud-idem-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	if err := os.MkdirAll(".go-arch", 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{Version: 1, Files: make(map[string]ManifestEntry), dir: "."}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/idem",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+	scaffolder := NewScaffolder(config)
+	if err := scaffolder.GenerateCRUD("User"); err != nil {
+		t.Fatalf("first GenerateCRUD failed: %v", err)
+	}
+	if err := scaffolder.GenerateCRUD("User"); err != nil {
+		t.Fatalf("second GenerateCRUD failed: %v", err)
+	}
+
+	// routes.go should have exactly one NewUserHandler().Register(mux)
+	routesContent, err := os.ReadFile("internal/router/routes.go")
+	if err != nil {
+		t.Fatalf("routes.go not created: %v", err)
+	}
+	routesStr := string(routesContent)
+	count := strings.Count(routesStr, "NewUserHandler().Register(mux)")
+	if count != 1 {
+		t.Errorf("expected exactly 1 NewUserHandler().Register(mux), got %d; content:\n%s", count, routesStr)
+	}
+}
+
+// ──────────────────────────────────────────────────────────
+// Task 2.4 — isValidRoutePattern (Strict TDD)
+// ──────────────────────────────────────────────────────────
+
+// TestIsValidRoutePattern verifies task 2.4: route pattern validation.
+func TestIsValidRoutePattern(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		want    bool
+	}{
+		{"valid GET", "GET /stats", true},
+		{"valid POST", "POST /users", true},
+		{"valid PUT", "PUT /items/1", true},
+		{"valid DELETE", "DELETE /items/1", true},
+		{"valid PATCH", "PATCH /items/1", true},
+		{"valid HEAD", "HEAD /health", true},
+		{"valid OPTIONS", "OPTIONS /api", true},
+		{"invalid method lowercase", "get /stats", false},
+		{"invalid method bad", "FOO /bar", false},
+		{"missing path", "GET", false},
+		{"missing method", "/foo", false},
+		{"path without leading slash", "GET stats", false},
+		{"empty", "", false},
+		{"three parts", "GET /a b", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValidRoutePattern(tt.pattern)
+			if got != tt.want {
+				t.Errorf("isValidRoutePattern(%q) = %v, want %v", tt.pattern, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestScaffolder_NewUnchanged verifies task 2.1: the new command path resolution
+// stays unchanged — files are written under project_name/ directory.
+func TestScaffolder_NewUnchanged(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "new-unchanged-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "myapp",
+		ModuleName:   "github.com/test/myapp",
+		Architecture: "Minimalist",
+	}
+	scaffolder := NewScaffolder(config)
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// Files must exist under myapp/ directory
+	projectDir := filepath.Join(tmpDir, "myapp")
+	for _, f := range []string{"main.go", "go.mod", ".go-arch.yaml"} {
+		if _, err := os.Stat(filepath.Join(projectDir, f)); os.IsNotExist(err) {
+			t.Errorf("expected file under %s: %s", projectDir, f)
+		}
+	}
+}
+
+// TestS2Sanity_FullWorkflow verifies the full Phase 2 workflow: scaffold web,
+// generate crud → routes.go has Register, generate handler --route → HandleFunc.
+func TestS2Sanity_FullWorkflow(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "s2sanity-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// 1. Scaffold web project (new)
+	cfg := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/s2sanity",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+	s := NewScaffolder(cfg)
+	if err := s.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	t.Log("✅ new web: ok")
+
+	// Verify empty routes.go exists
+	routesPath := "internal/router/routes.go"
+	if _, err := os.Stat(routesPath); os.IsNotExist(err) {
+		t.Fatal("FAIL: empty routes.go not created")
+	}
+	t.Log("✅ empty routes.go: ok")
+
+	// 2. Generate crud User
+	if err := s.GenerateCRUD("User"); err != nil {
+		t.Fatalf("GenerateCRUD failed: %v", err)
+	}
+	content, _ := os.ReadFile(routesPath)
+	if !strings.Contains(string(content), "NewUserHandler().Register(mux)") {
+		t.Fatalf("FAIL: routes.go missing Register line\nGot: %s", content)
+	}
+	t.Log("✅ generate crud User: routes registered")
+
+	// 3. Generate handler with --route "GET /stats"
+	if err := s.GenerateComponent("handler", "Stats", WithRoute("GET /stats")); err != nil {
+		t.Fatalf("GenerateComponent handler failed: %v", err)
+	}
+	content, _ = os.ReadFile(routesPath)
+	if !strings.Contains(string(content), `mux.HandleFunc("GET /stats"`) {
+		t.Fatalf("FAIL: routes.go missing mux.HandleFunc\nGot: %s", content)
+	}
+	t.Log("✅ generate handler Stats --route: HandleFunc added")
+	t.Log("=== S2 Sanity PASSED ===")
+}
+
 func TestScaffolder_CRUD(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "crud-integration-*")
 	if err != nil {
