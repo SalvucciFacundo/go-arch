@@ -33,3 +33,7 @@ vendor/
 *.test
 *.out
 coverage.txt
+
+# Local planning docs (never pushed)
+ROADMAP.md
+briefing-*.md

@@ -16,6 +16,7 @@ type ProjectConfig struct {
 	ObservabilityBackend string `mapstructure:"observability_backend"`
 	UseGRPC              bool   `mapstructure:"use_grpc"`
 	UseTemplHTMX         bool   `mapstructure:"use_templ_htmx"`
+	GoArchVersion        string `mapstructure:"go_arch_version"`
 }
 
 func RunWizard() (*ProjectConfig, error) {
