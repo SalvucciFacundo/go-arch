@@ -88,14 +88,28 @@ Every CLI command has a corresponding MCP tool for agents:
 
 ---
 
-## 7. `version` 🏷️
+## 7. `doctor` 🩺
+**Usage**: `go-arch doctor`
+
+Runs environment diagnostics and reports issues found:
+- **Go toolchain**: checks `go version` is available.
+- **air (hot-reload)**: checks whether `air` is installed (if not, `go-arch serve` falls back to `go run`).
+- **git**: checks whether `git` is installed.
+- **Platform**: reports OS/architecture.
+- **Project config**: validates the `.go-arch.yaml` (skipped with a finding when not in a go-arch project).
+
+Exits non-zero when any check fails, so it is safe to use in scripts and CI.
+
+---
+
+## 8. `version` 🏷️
 **Usage**: `go-arch version`
 
 Prints the build version. When built via GoReleaser (tagged release), the version is injected automatically. Local development builds print `dev`.
 
 ---
 
-## 8. Metadata System (`.go-arch.yaml`) 📄
+## 9. Metadata System (`.go-arch.yaml`) 📄
 
 The CLI is stateless, meaning it doesn't store your project data in a database. Instead, it uses this YAML file as the **Source of Truth**.
 - **Architecture Locking**: Prevents generating components that don't match the project's initial architecture.
