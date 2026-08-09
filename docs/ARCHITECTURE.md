@@ -121,10 +121,41 @@ If **Docker Support** is enabled during the `new` command, the CLI generates:
 
 ---
 
+## 🌐 Server-Rendered Frontend (templ + HTMX)
+
+When the **templ + HTMX frontend** option is enabled during `go-arch new`, the generated project becomes full-stack — the frontend lives inside the same Go binary (no SPA, no Node, no bundler).
+
+### Generated Structure
+```mermaid
+graph TD
+    Main["main.go / cmd/api/main.go (web main)"]
+    Main --> Mux["http.NewServeMux (GET /, POST /counter, GET /static/)"]
+    Main --> FS["http.FileServer(/static/)"]
+    Main --> Handler["internal/handler/ (page.go: PageHandler, CounterHandler)"]
+    Handler --> Pages["views/pages/ (home.templ)"]
+    Handler --> Components["views/components/ (counter.templ with hx-* attributes)"]
+    Pages --> Layouts["views/layouts/ (base.templ)"]
+    Components --> HTMX["static/js/htmx.min.js (vendored binary, copied not rendered)"]
+```
+
+### How It Works
+- **Views**: `*.templ` files (templ language) compile to pure Go via `templ generate`. The engine's `//go:embed all:templates/*` embeds them; the scaffold writes `views/{layouts,pages,components}/`.
+- **Interactivity**: HTMX attributes (`hx-post`, `hx-target`, `hx-swap`) make the browser send AJAX requests declared in HTML — no custom JS. The server returns HTML fragments; HTMX swaps them without a page reload.
+- **State**: Lives on the server (e.g. a `sync.Mutex`-guarded counter in the handler), never duplicated client-side.
+- **Web main**: When the frontend is enabled, `web/main.tmpl` replaces the architecture main — it registers the mux, static file serving, and the conditional telemetry/gRPC blocks. Minimalist writes to root `main.go`; Standard/Hexagonal to `cmd/api/main.go`.
+- **Binary asset**: `htmx.min.js` is copied byte-for-byte via `TemplatesFS.ReadFile` + `os.WriteFile` — never passed through the text/template engine (it would choke on `{{ }}`).
+
+### Frontend Generation
+`go-arch generate page <Name>` and `go-arch generate component <Name>` create templ views in `views/pages/` and `views/components/`, gated on `use_templ_htmx: true` in `.go-arch.yaml`, with CamelCase name validation and collision detection.
+
+---
+
 ## 🛠️ Internal CLI Architecture
 
 The CLI itself is built following the **Screaming Architecture** pattern:
-- **`internal/ui/`**: Cobra & Survey.v2 commands.
-- **`internal/pkg/template/`**: The "Lookup" Engine and embedded blueprints.
-- **`internal/pkg/scaffold/`**: The orchestrator that maps metadata to file creation.
-- **`internal/pkg/osutil/`**: OS-specific detection and utilities.
+- **`cmd/`**: Cobra commands (`new`, `generate`, `check`, `serve`, `setup`, `mcp`, `version`).
+- **`internal/ui/`**: Styled output helpers and the interactive survey wizard.
+- **`internal/pkg/template/`**: The "Lookup" Engine and embedded blueprints (including the `web/` templates for templ + HTMX).
+- **`internal/pkg/scaffold/`**: The orchestrator that maps metadata to file creation (and the `web` scaffold for the frontend).
+- **`internal/pkg/validator/`**: Architectural rule validation used by `go-arch check`.
+- **`internal/pkg/mcp/`**: The MCP server exposing CLI commands as tools over stdio.

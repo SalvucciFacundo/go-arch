@@ -20,7 +20,9 @@
 - 🏗️ **Architecture Layouts**: Native support for **Minimalist**, **Standard**, and **Hexagonal** (Ports & Adapters).
 - 🔌 **Agnostic & Decoupled**: Data-driver independent (PostgreSQL, MySQL, MongoDB) and IDE-agnostic.
 - ⚡ **Built-in Hot-Reload**: Seamless integration with `Air` for a high-performance development loop.
-- 🛠️ **Component Generators**: Scaffold Services, Repositories, and Handlers mapped to your layout.
+- 🛠️ **Component Generators**: Scaffold Services, Repositories, Handlers, CRUD, and more mapped to your layout.
+- 🌐 **Server-Rendered Frontend**: Optional **templ + HTMX** frontend living in the same binary — no SPA, no Node.
+- 🧩 **Frontend Generators**: `generate page` and `generate component` for templ views with HTMX attributes.
 - 🐚 **Infrastructure Ready**: Optional **Docker** & **Docker Compose** generation for the app and DB.
 - 🧪 **QA & TDD Oriented**: Automatic test file generation with manual mocking patterns.
 - 🎨 **Deep Customization**: High-level template system (Global/Local) to override any generated code.
@@ -28,6 +30,7 @@
 - 🛡️ **Living Architecture**: Built-in validation to ensure project integrity over time.
 - 🔭 **Multi-Backend Observability**: Built-in OpenTelemetry support for **Jaeger**, **Zipkin**, **Prometheus**, and **SigNoz**.
 - 🛰️ **Microservices Ready**: Native **gRPC & Protocol Buffers** integration with automated code generation.
+- 🤖 **MCP Server**: Exposes every CLI command as an MCP tool for coding agents (OpenCode, Claude Desktop, etc.).
 - 🧊 **Multi-Platform**: Native packages for **Linux (Arch, Debian, Alpine, Fedora)**, **macOS**, and **Windows**.
 
 ## 🚀 Installation
@@ -81,10 +84,27 @@ go-arch generate repository User
 go-arch generate crud Category # Complete CRUD implementation
 ```
 
+In projects scaffolded with the **templ + HTMX frontend**, you can also generate frontend parts:
+```bash
+go-arch generate page Dashboard        # views/pages/dashboard.templ
+go-arch generate component UserCard    # views/components/usercard.templ (with HTMX attributes)
+```
+
 ### 5. Model Context Protocol (MCP) Server
-Starts a native MCP server communicating over standard input/output (stdio), allowing coding agents (like OpenCode, Claude Desktop, or Gemini) to interact with the CLI tools.
+Starts a native MCP server communicating over standard input/output (stdio), allowing coding agents (like OpenCode, Claude Desktop, or Gemini) to interact with the CLI tools. Every CLI command has a corresponding tool:
 ```bash
 go-arch mcp
+```
+- `new_project` → `go-arch new`
+- `generate_component` → `go-arch generate` (incl. `page` / `component`)
+- `check_architecture` → `go-arch check`
+- `serve_project` → `go-arch serve` (returns the exact run command)
+- `setup_environment` → `go-arch setup` (detects, and can install `air` with consent)
+
+### 6. Version
+Prints the build version. Local builds print `dev`; GoReleaser releases inject the tag automatically.
+```bash
+go-arch version
 ```
 
 ## 🏗️ Supported Architectures
