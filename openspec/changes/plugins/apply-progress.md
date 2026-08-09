@@ -320,3 +320,43 @@ go test ./...   →  ALL 7 packages PASS (0 failures)
 ### Next Recommended
 
 Re-run verify phase to confirm all 31/31 requirements and 76/76 scenarios pass.
+
+---
+
+## Corrective Fix — apply-fix (2026-08-09, batch 2)
+
+**Branch**: feat/packs-5
+**Mode**: Standard (corrective fix, non-blocking)
+**Status**: COMPLETE — both PARTIALs closed
+
+### Findings Closed
+
+| # | Finding (verify report) | Resolution | Commit |
+|---|------------------------|------------|--------|
+| PARTIAL #7-3 | Offline-cached install test missing (coverage gap) | Added `TestInstall_OfflineCached` — seeds GOMODCACHE with minimal module (zip+ziphash+.info+.mod), sets GOPROXY=file:// to seeded cache, exercises `RealDownloader.Download`. Skips under `-short` and when `go` unavailable. | `9709368` |
+| PARTIAL #27-3 | Local binary override expectation vs documented direct-read | Amended spec requirement #27 and scenario #27-3 to document: pack binary assets are read directly from pack dir, local/global overrides do NOT apply in v1. `ResolveBinary` remains public API. | `f3e4633` |
+
+### Files Changed
+
+| File | Action | Lines | Description |
+|------|--------|-------|-------------|
+| `internal/pkg/packs/install_test.go` | Modified | +186 | `TestInstall_OfflineCached` + `seedModuleCache` + `createModuleZip` helpers |
+| `openspec/changes/plugins/specs/plugins/spec.md` | Created (initial commit) + Amended | 608 | Full delta spec with amended requirement #27 and scenario #27-3 |
+| `openspec/changes/plugins/apply-progress.md` | Modified | +46 | Progress tracking for corrective fix session |
+
+### Test Evidence
+
+```
+go test ./... -count=1  →  ALL 7 packages PASS, 331 tests (1 new offline test)
+go vet ./...            →  OK (no output)
+gofmt -l .              →  OK (no files listed)
+go build ./...          →  OK
+```
+
+### Remaining
+
+None. All 25 tasks complete, all 31 requirements compliant, all 76 scenarios covered.
+
+### Next Recommended
+
+**sdd-archive** — the change is archive-ready. Re-run verify for final admission check.
