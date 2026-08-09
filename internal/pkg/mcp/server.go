@@ -309,7 +309,11 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			UseTemplHTMX:         args.UseTemplHTMX,
 		}
 
-		hooksCfg, _ := hooks.Load(hooks.ResolveConfigPath())
+		hooksCfg, hErr := hooks.Load(hooks.ResolveConfigPath())
+		if hErr != nil {
+			sendToolResult(id, fmt.Sprintf("Failed to load hooks config: %v", hErr), true)
+			return
+		}
 		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
 		scaffolder := scaffold.NewScaffolder(cfg,
 			scaffold.WithRunner(runner),
@@ -361,7 +365,11 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			UseTemplHTMX: viper.GetBool("use_templ_htmx"),
 		}
 
-		hooksCfg, _ := hooks.Load(hooks.ResolveConfigPath())
+		hooksCfg, hErr := hooks.Load(hooks.ResolveConfigPath())
+		if hErr != nil {
+			sendToolResult(id, fmt.Sprintf("Failed to load hooks config: %v", hErr), true)
+			return
+		}
 		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
 		scaffolder := scaffold.NewScaffolder(cfg, scaffold.WithRunner(runner))
 		var err error

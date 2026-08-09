@@ -139,7 +139,18 @@ func (r *Runner) Fire(t Type, ctx EnvContext, defaultCwd string) error {
 					Hint("Increase the timeout: field or optimize the hook command").
 					Wrap(err)
 			}
+			// Object-form: OS-level command resolution failed.
 			if errors.Is(err, exec.ErrNotFound) {
+				return oops.
+					Code(CodeHookCommandNotFound).
+					Hint("Install the missing tool or check your PATH").
+					Wrap(err)
+			}
+			// String-form via sh -c (or cmd /c on Windows): the shell
+			// itself was found, but the inner command is missing.
+			// POSIX sh convention: exit 127 = command not found.
+			// cmd.exe convention:    exit 9009 = command not found.
+			if exitCode == 127 || exitCode == 9009 {
 				return oops.
 					Code(CodeHookCommandNotFound).
 					Hint("Install the missing tool or check your PATH").

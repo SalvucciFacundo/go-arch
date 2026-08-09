@@ -2521,6 +2521,58 @@ func TestScaffolder_StopOnFirst_FailsPreNew(t *testing.T) {
 	}
 }
 
+func TestScaffolder_PostNew_FailureNonAtomic(t *testing.T) {
+	// Req 10, Scenario 2: a failing post-new hook leaves generated files on
+	// disk (non-atomic by design) and returns an error.
+	tmpDir, err := os.MkdirTemp("", "hooks-postfail-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	fr := &hooks.FakeRunner{
+		Responses: []hooks.FakeResponse{
+			{ExitCode: 0}, // pre-new succeeds
+			{ExitCode: 1}, // post-new fails (exit 1)
+		},
+	}
+	runner := hooks.NewRunner(&hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{
+			hooks.PreNew:  {{Command: "echo", Args: []string{"pre"}}},
+			hooks.PostNew: {{Command: "false"}},
+		},
+	}, fr, &bytes.Buffer{})
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "NonAtomicApp",
+		ModuleName:   "github.com/test/nonatomic",
+		Architecture: "Minimalist",
+	}
+	scaffolder := NewScaffolder(config, WithRunner(runner), WithVersion("1.0.0"))
+
+	err = scaffolder.Execute()
+	if err == nil {
+		t.Fatal("expected error from post-new failure, got nil")
+	}
+
+	// Project files must remain on disk (non-atomic by design).
+	projDir := filepath.Join(tmpDir, "NonAtomicApp")
+	for _, f := range []string{"main.go", "go.mod", ".go-arch.yaml"} {
+		p := filepath.Join(projDir, f)
+		if _, statErr := os.Stat(p); os.IsNotExist(statErr) {
+			t.Errorf("expected file %s to remain on disk after post-new failure", p)
+		}
+	}
+	// Verify pre-new and post-new both fired (pre-new succeeded, post-new failed).
+	if len(fr.Calls) != 2 {
+		t.Errorf("expected 2 calls (pre-new + post-new), got %d", len(fr.Calls))
+	}
+}
+
 func TestScaffolder_NilRunner_IsNoop(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "hooks-nil-*")
 	if err != nil {
@@ -2552,5 +2604,96 @@ func TestScaffolder_NilRunner_IsNoop(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "go_arch_version: 1.0.0") {
 		t.Error("expected go_arch_version in .go-arch.yaml even without hooks runner")
+	}
+}
+
+// --- Slice 4: real-tool smoke, silent, empty-config noop ---
+
+func TestHooks_RealTool_Gofmt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real-tool hook smoke in short mode")
+	}
+	if _, err := exec.LookPath("gofmt"); err != nil {
+		t.Skip("gofmt not installed — skipping real-tool hook smoke")
+	}
+
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "SmokeApp",
+		ModuleName:   "github.com/test/smoke",
+		Architecture: "Minimalist",
+	}
+
+	// Post-new hooks: gofmt formats the scaffolded files (smoke-tests the
+	// RealRunner integration), go mod tidy cleans up go.sum.
+	hooksCfg := &hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{
+			hooks.PostNew: {
+				{Command: "gofmt", Args: []string{"-w", "."}},
+				{Command: "go", Args: []string{"mod", "tidy"}, IgnoreFailure: true},
+			},
+		},
+	}
+	runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, os.Stderr)
+
+	scaffolder := NewScaffolder(config, WithRunner(runner), WithVersion("1.0.0"))
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute with real-tool hooks failed: %v", err)
+	}
+
+	// gofmt should have run in the project dir (post-new CWD = project dir).
+	projectDir := filepath.Join(tmpDir, "SmokeApp")
+	if _, err := os.Stat(filepath.Join(projectDir, "main.go")); err != nil {
+		t.Fatalf("main.go missing after scaffold: %v", err)
+	}
+}
+
+func TestHooks_Silent_SuppressesOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real-echo silent test in short mode")
+	}
+
+	var outBuf bytes.Buffer
+	runner := hooks.NewRunner(&hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{
+			hooks.PostGenerate: {
+				{Command: "echo", Args: []string{"SHOULD_NOT_APPEAR"}, Silent: true},
+			},
+		},
+	}, hooks.RealRunner{}, &outBuf)
+
+	if err := runner.Fire(hooks.PostGenerate, hooks.EnvContext{}, "."); err != nil {
+		t.Fatalf("Fire with silent hook failed: %v", err)
+	}
+
+	if got := outBuf.String(); got != "" {
+		t.Errorf("silent hook should produce no output, got %q", got)
+	}
+}
+
+func TestHooks_EmptyConfig_IsNoop(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Non-nil runner but empty Hooks map — should be a silent no-op.
+	runner := hooks.NewRunner(&hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{},
+	}, hooks.RealRunner{}, os.Stderr)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "EmptyHooksApp",
+		ModuleName:   "github.com/test/emptyhooks",
+		Architecture: "Minimalist",
+	}
+	scaffolder := NewScaffolder(config, WithRunner(runner), WithVersion("1.0.0"))
+
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute with empty hooks config should succeed, got: %v", err)
 	}
 }

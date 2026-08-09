@@ -306,6 +306,37 @@ architecture: Standard`
 	}
 }
 
+func TestConfig_Load_ExtraKeysIgnored(t *testing.T) {
+	// Req 7 backward compatibility: Viper silently ignores unknown top-level
+	// keys like "hooks:". This test verifies that Load() parses the hooks
+	// section while ignoring other config keys (project_name, architecture,
+	// etc.) — they don't leak into hooks parsing and don't cause errors.
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".go-arch.yaml")
+	yaml := `project_name: myapp
+module_name: github.com/test/myapp
+architecture: Hexagonal
+hooks:
+  post-generate:
+    - "gofmt -w ."`
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load with extra keys should not error: %v", err)
+	}
+	entries := cfg.Hooks[PostGenerate]
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Command != "gofmt" {
+		t.Errorf("Command = %q, want gofmt", entries[0].Command)
+	}
+	// Extra keys don't appear in hooks config (structurally impossible — rawConfig
+	// only has a Hooks field, so yaml.v3 silently discards the rest).
+}
+
 func TestResolveConfigPath_DefaultToHome(t *testing.T) {
 	path := ResolveConfigPath()
 	if path == "" {

@@ -59,7 +59,12 @@ Flags:
 
 		routeFlag, _ := cmd.Flags().GetString("route")
 
-		hooksCfg, _ := hooks.Load(hooks.ResolveConfigPath())
+		hooksCfg, loadErr := hooks.Load(hooks.ResolveConfigPath())
+		if loadErr != nil {
+			return oops.
+				Code("hooks_load_failed").
+				Wrap(loadErr)
+		}
 		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
 
 		scaffolder := scaffold.NewScaffolder(config, scaffold.WithRunner(runner))
