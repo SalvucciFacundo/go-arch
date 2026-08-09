@@ -19,12 +19,6 @@ import (
 // testStdout returns a bytes.Buffer to use as the output writer.
 func testStdout() *bytes.Buffer { return &bytes.Buffer{} }
 
-// mustWrap is a tiny helper so we can annotate the FakeRunner error
-// the same way Fire would — simplifies error code assertions in tests.
-func mustWrap(err error, code string) error {
-	return oops.Code(code).Wrap(err)
-}
-
 // assertCode checks that err wraps an oops error with the given code.
 func assertCode(t *testing.T, err error, want string) {
 	t.Helper()
