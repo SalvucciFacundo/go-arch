@@ -1,5 +1,7 @@
 # Tasks: Upgrade Project — Template Propagation via Fingerprint Manifest
 
+> **Status: ARCHIVED** — 2026-08-09. All 19/19 tasks complete. Verify PASS 29/29 after the `--project-path` viper re-read fix (commit `576317c`). Change closed and archived per the SDD archive phase.
+
 ## Review Workload Forecast
 
 Decision needed before apply: No
