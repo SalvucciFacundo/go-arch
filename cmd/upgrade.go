@@ -49,6 +49,17 @@ var upgradeCmd = &cobra.Command{
 					Hint("Check that the path exists and is a directory").
 					Errorf("cannot change to %s: %v", projectPath, err)
 			}
+
+			// Re-read viper from the new working directory (initConfig
+			// already read from CWD — but we just chdir'd to the target).
+			viper.Reset()
+			viper.AddConfigPath(".")
+			viper.SetConfigName(".go-arch")
+			if err := viper.ReadInConfig(); err != nil {
+				return oops.Code("missing_config").
+					Hint("Run 'go-arch setup' to initialize the project").
+					Errorf("No valid configuration found. Are you in the root of a go-arch project?")
+			}
 		}
 
 		// Validate config (missing_config pattern from check.go)

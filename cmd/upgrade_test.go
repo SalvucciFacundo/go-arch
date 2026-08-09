@@ -394,6 +394,62 @@ files:
 }
 
 // ──────────────────────────────────────────────────────────
+// 3.4: --project-path re-reads viper from the target directory
+// ──────────────────────────────────────────────────────────
+
+func TestUpgradeProjectPathReReadsConfig(t *testing.T) {
+	// Source directory: NO .go-arch.yaml → initConfig would fail
+	srcDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	os.Chdir(srcDir)
+	defer os.Chdir(oldWd)
+
+	// Target directory: HAS a valid .go-arch.yaml + manifest
+	targetDir := t.TempDir()
+
+	configYAML := `project_name: "projpath-test"
+module_name: github.com/test/projpath
+architecture: Standard
+`
+	if err := os.WriteFile(filepath.Join(targetDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	envContent := "DB_HOST=localhost\n"
+	if err := os.WriteFile(filepath.Join(targetDir, ".env"), []byte(envContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	envHash := sha256Sum([]byte(envContent))
+	if err := os.MkdirAll(filepath.Join(targetDir, ".go-arch"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestYAML := `version: 1
+files:
+  .env:
+    path: .env
+    sha256: "` + envHash + `"
+    origin: scaffold
+    template: common/env.tmpl
+`
+	if err := os.WriteFile(filepath.Join(targetDir, ".go-arch", "manifest.yaml"), []byte(manifestYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	resetUpgradeState()
+
+	buf, err := runUpgradeWithBuf(t, []string{"upgrade", "--project-path", targetDir})
+	if err != nil {
+		t.Fatalf("upgrade --project-path should succeed (no missing_config), got: %v\nOutput: %s", err, buf.String())
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "project_name") && !strings.Contains(out, "upgradable") && !strings.Contains(out, "update") && !strings.Contains(out, "up to date") {
+		t.Errorf("output should show a valid upgrade plan, got: %s", out)
+	}
+}
+
+// ──────────────────────────────────────────────────────────
 // 3.4: Templ hint presence
 // ──────────────────────────────────────────────────────────
 
