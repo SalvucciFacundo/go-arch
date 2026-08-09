@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go-arch/internal/pkg/scaffold"
 	"go-arch/internal/ui"
+	"path/filepath"
 
 	"github.com/samber/oops"
 	"github.com/spf13/cobra"
@@ -36,6 +37,11 @@ var newCmd = &cobra.Command{
 				Code("scaffold_failed").
 				With("project_name", config.ProjectName).
 				Wrapf(err, "Error while scaffolding the project")
+		}
+
+		// Surgically write the CLI version into .go-arch.yaml (non-fatal)
+		if err := scaffold.WriteVersionField(filepath.Join(config.ProjectName, ".go-arch.yaml"), Version); err != nil {
+			ui.Warning(fmt.Sprintf("Could not set go_arch_version: %v", err))
 		}
 
 		ui.Success(fmt.Sprintf("Project '%s' created successfully!", config.ProjectName))
