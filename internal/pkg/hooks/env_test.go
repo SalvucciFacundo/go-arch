@@ -212,3 +212,44 @@ func TestBuildEnv_StandardOverridesParent(t *testing.T) {
 	assertEnv(t, result, "PROJECT_NAME", "from_ctx")
 	assertEnv(t, result, "ARCHITECTURE", "Hexagonal")
 }
+
+// TestBuildEnv_PackEnvVarsPresent verifies task 4.5: when PackName and
+// PackVersion are set, PACK_NAME and PACK_VERSION appear in the env.
+func TestBuildEnv_PackEnvVarsPresent(t *testing.T) {
+	ctx := EnvContext{
+		ProjectName: "myapp",
+		ProjectPath: "/tmp/myapp",
+		Arch:        "Standard",
+		HookType:    PostNew,
+		PackName:    "express",
+		PackVersion: "1.0.0",
+	}
+
+	result := BuildEnv(nil, ctx, nil)
+
+	assertEnv(t, result, "PACK_NAME", "express")
+	assertEnv(t, result, "PACK_VERSION", "1.0.0")
+	// Standard vars still present
+	assertEnv(t, result, "PROJECT_NAME", "myapp")
+	assertEnv(t, result, "HOOK_TYPE", "post-new")
+}
+
+// TestBuildEnv_PackEnvVarsAbsent verifies task 4.5: when PackName and
+// PackVersion are empty, PACK_NAME and PACK_VERSION are absent.
+func TestBuildEnv_PackEnvVarsAbsent(t *testing.T) {
+	ctx := EnvContext{
+		ProjectName: "myapp",
+		ProjectPath: "/tmp/myapp",
+		Arch:        "Standard",
+		HookType:    PostNew,
+	}
+
+	result := BuildEnv(nil, ctx, nil)
+
+	// PACK_NAME and PACK_VERSION must NOT be present
+	for _, e := range result {
+		if strings.HasPrefix(e, "PACK_NAME=") || strings.HasPrefix(e, "PACK_VERSION=") {
+			t.Errorf("expected PACK_NAME/PACK_VERSION to be absent when empty, but found: %s", e)
+		}
+	}
+}

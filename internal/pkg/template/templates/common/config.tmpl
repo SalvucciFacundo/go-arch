@@ -4,6 +4,12 @@
 project_name: {{ .ProjectName }}
 module_name: {{ .ModuleName }}
 architecture: {{ .Architecture }}
+# Template pack — set by go-arch when scaffolding from a pack.
+{{- if .Template }}
+template: {{ .Template }}
+{{- else }}
+# template: <pack-name>  # e.g. go-arch template install <mod>@<ver>
+{{- end }}
 db_driver: {{ .DBDriver }}
 use_docker: {{ .UseDocker }}
 use_observability: {{ .UseObservability }}

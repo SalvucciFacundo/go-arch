@@ -10,6 +10,8 @@ import (
 	"text/template"
 	"time"
 
+	"go-arch/internal/ui"
+
 	"github.com/jinzhu/inflection"
 )
 
@@ -18,14 +20,60 @@ import (
 //go:embed all:templates/*
 var TemplatesFS embed.FS
 
-type Engine struct {
-	fs embed.FS
+// SourceKind identifies which source provided a resolved template or binary.
+type SourceKind int
+
+const (
+	SourceLocal    SourceKind = iota // .go-arch/templates/
+	SourceGlobal                     // ~/.go-arch/templates/
+	SourcePack                       // ~/.go-arch/packs/<name>@<ver>/templates/
+	SourceEmbedded                   // embedded FS
+)
+
+// ResolvedSource represents a resolved binary file with a source kind and
+// a read function. The Read closure unifies disk paths and embedded FS reads
+// so callers don't need to know the source.
+type ResolvedSource struct {
+	Kind SourceKind
+	Read func() ([]byte, error)
 }
 
-func NewEngine() *Engine {
-	return &Engine{
+// EngineOption is a functional option for Engine.
+type EngineOption func(*Engine)
+
+// WithPacksDir sets the packs installation directory.
+func WithPacksDir(dir string) EngineOption {
+	return func(e *Engine) {
+		e.packsDir = dir
+	}
+}
+
+// WithPack activates pack-scoped template resolution.
+func WithPack(name, version string) EngineOption {
+	return func(e *Engine) {
+		e.packName = name
+		e.packVersion = version
+	}
+}
+
+type Engine struct {
+	fs          embed.FS
+	packsDir    string
+	packName    string
+	packVersion string
+}
+
+// NewEngine creates a new template engine. Optional EngineOption functions
+// can configure pack directory and active pack. With no options, the engine
+// uses the default 3-step chain (local > global > embedded).
+func NewEngine(opts ...EngineOption) *Engine {
+	e := &Engine{
 		fs: TemplatesFS,
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
 // Render renders a template to wr, printing a notice to stdout when a custom
@@ -45,7 +93,7 @@ func (e *Engine) RenderTo(wr io.Writer, templatePath string, data interface{}, q
 	}
 
 	if !quiet && source != "embedded" {
-		fmt.Printf("🎨 Using custom template (%s): %s\n", source, templatePath)
+		fmt.Fprintf(ui.Out, "🎨 Using custom template (%s): %s\n", source, templatePath)
 	}
 
 	return t.Execute(wr, data)
@@ -69,10 +117,70 @@ func (e *Engine) getTemplate(templatePath string) (*template.Template, string, e
 		}
 	}
 
-	// 3. Embedded
+	// 3. Pack (only when a pack is configured via options)
+	if e.packName != "" {
+		packPath := filepath.Join(e.packsDir, e.packName+"@"+e.packVersion, "templates", templatePath)
+		if _, err := os.Stat(packPath); err == nil {
+			t, err := template.New(filepath.Base(templatePath)).Funcs(e.getFuncMap()).ParseFiles(packPath)
+			return t, "pack:" + e.packName + "@" + e.packVersion, err
+		}
+	}
+
+	// 4. Embedded
 	embeddedPath := filepath.Join("templates", templatePath)
 	t, err := template.New(filepath.Base(templatePath)).Funcs(e.getFuncMap()).ParseFS(e.fs, embeddedPath)
 	return t, "embedded", err
+}
+
+// ResolveBinary resolves a binary asset path through the same 4-step chain
+// as templates (local > global > pack > embedded). Returns a ResolvedSource
+// whose Read closure reads the actual bytes from the winning source.
+func (e *Engine) ResolveBinary(path string) (ResolvedSource, error) {
+	// 1. Local
+	localPath := filepath.Join(".go-arch", path)
+	if _, err := os.Stat(localPath); err == nil {
+		return ResolvedSource{
+			Kind: SourceLocal,
+			Read: func() ([]byte, error) {
+				return os.ReadFile(localPath)
+			},
+		}, nil
+	}
+
+	// 2. Global
+	home, errHome := os.UserHomeDir()
+	if errHome == nil {
+		globalPath := filepath.Join(home, ".go-arch", path)
+		if _, err := os.Stat(globalPath); err == nil {
+			return ResolvedSource{
+				Kind: SourceGlobal,
+				Read: func() ([]byte, error) {
+					return os.ReadFile(globalPath)
+				},
+			}, nil
+		}
+	}
+
+	// 3. Pack
+	if e.packName != "" {
+		packPath := filepath.Join(e.packsDir, e.packName+"@"+e.packVersion, path)
+		if _, err := os.Stat(packPath); err == nil {
+			return ResolvedSource{
+				Kind: SourcePack,
+				Read: func() ([]byte, error) {
+					return os.ReadFile(packPath)
+				},
+			}, nil
+		}
+	}
+
+	// 4. Embedded
+	return ResolvedSource{
+		Kind: SourceEmbedded,
+		Read: func() ([]byte, error) {
+			return e.fs.ReadFile(filepath.Join("templates", path))
+		},
+	}, nil
 }
 
 func (e *Engine) getFuncMap() template.FuncMap {

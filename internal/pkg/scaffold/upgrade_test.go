@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"go-arch/internal/pkg/packs"
 	"go-arch/internal/pkg/template"
 	"go-arch/internal/ui"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/samber/oops"
 )
 
 // hashBytesForTest computes sha256 hex digest of in-memory bytes.
@@ -1166,6 +1170,358 @@ func TestUpgrade_CreatesRoutesGoPreChange(t *testing.T) {
 		if f.Path == "internal/router/routes.go" {
 			t.Errorf("routes.go should be up-to-date on second upgrade, got classification=%s", f.Classification)
 		}
+	}
+}
+
+// ──────────────────────────────────────────────────────────
+// Phase 5: Pack source upgrade tests (5.1)
+// ──────────────────────────────────────────────────────────
+
+// fakeResolver implements Resolver for testing pack-sourced upgrade.
+type fakeResolver struct {
+	resolve func(name, version string) (packs.PackInfo, error)
+}
+
+func (f *fakeResolver) Resolve(name, version string) (packs.PackInfo, error) {
+	if f.resolve != nil {
+		return f.resolve(name, version)
+	}
+	return packs.PackInfo{}, oops.
+		Code(packs.CodePackNotInstalled).
+		Errorf("pack %q is not installed", name+"@"+version)
+}
+
+// createPackTemplateDir creates a synthetic pack directory with a single
+// template file at templates/<templatePath>. Returns the pack root dir.
+func createPackTemplateDir(t *testing.T, packName, packVersion, templatePath, content string) string {
+	t.Helper()
+	packDir := filepath.Join(t.TempDir(), packName+"@"+packVersion)
+	packTemplatesDir := filepath.Join(packDir, "templates")
+	tmplFile := filepath.Join(packTemplatesDir, templatePath)
+	if err := os.MkdirAll(filepath.Dir(tmplFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmplFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return packDir
+}
+
+// TestUpgrade_PackSource_RerendersFromPack verifies that when a manifest
+// entry has Source="pack:express@1.0.0", the re-render reads from the
+// recorded pack directory directly, BYPASSING the local/global/embedded chain.
+func TestUpgrade_PackSource_RerendersFromPack(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName: ".",
+		ModuleName:  "github.com/test/pack-upgrade",
+	}
+
+	// Embedded template renders V1 content.
+	engine := template.NewEngine()
+	var v1Buf bytes.Buffer
+	if err := engine.RenderTo(&v1Buf, "common/env.tmpl", cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	v1Content := v1Buf.Bytes()
+	v1Hash := hashBytesForTest(v1Content)
+
+	// Write V1 to disk.
+	if err := os.WriteFile(".env", v1Content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Synthetic pack dir with V2 template content (differs from V1).
+	v2Template := "# PACK V2 ENV TEMPLATE\nDB_HOST=pack-host\n"
+	packDir := createPackTemplateDir(t, "express", "1.0.0", "common/env.tmpl", v2Template)
+
+	// Build a PackInfo from the synthetic dir.
+	packInfo := packs.PackInfo{
+		Dir: packDir,
+		Manifest: &packs.Manifest{
+			Name:    "express",
+			Version: "1.0.0",
+		},
+	}
+
+	// Manifest entry records pack source and V1 hash.
+	m := &Manifest{
+		Version: 1,
+		Files: map[string]ManifestEntry{
+			".env": {
+				Path:         ".env",
+				SHA256:       v1Hash,
+				Origin:       OriginScaffold,
+				TemplatePath: "common/env.tmpl",
+				Source:       "pack:express@1.0.0",
+			},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := &fakeResolver{
+		resolve: func(name, version string) (packs.PackInfo, error) {
+			if name == "express" && version == "1.0.0" {
+				return packInfo, nil
+			}
+			return packs.PackInfo{}, fmt.Errorf("not installed")
+		},
+	}
+
+	plan, err := Upgrade(cfg, WithResolver(resolver))
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	// The pack V2 template should produce different output than disk V1.
+	upgradable := plan.CountBy(ClassUpgradable)
+	if upgradable != 1 {
+		t.Fatalf("upgradable count = %d, want 1. Plan: %+v", upgradable, plan.Files)
+	}
+
+	f := plan.Files[0]
+	if f.Path != ".env" {
+		t.Errorf("path = %q, want .env", f.Path)
+	}
+	if f.Classification != ClassUpgradable {
+		t.Errorf("classification = %q, want upgradable", f.Classification)
+	}
+	if len(f.RerenderBytes) == 0 {
+		t.Error("RerenderBytes should be non-empty for upgradable entries")
+	}
+
+	// Apply should write the pack-rendered content.
+	applied, err := plan.Apply()
+	if err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+	if applied != 1 {
+		t.Errorf("applied count = %d, want 1", applied)
+	}
+
+	// Disk must now contain pack V2 content.
+	diskAfter, _ := os.ReadFile(".env")
+	rendered := string(diskAfter)
+	if !strings.Contains(rendered, "PACK V2") {
+		t.Errorf("disk content after apply does not come from pack:\n%s", rendered)
+	}
+}
+
+// TestUpgrade_PackSource_MissingPackProtected verifies that when the pack
+// recorded in Source is not installed, the entry is classified as PROTECTED
+// and a warning is emitted naming the missing pack.
+func TestUpgrade_PackSource_MissingPackProtected(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName: ".",
+		ModuleName:  "github.com/test/missing-pack",
+	}
+
+	// Write some content on disk.
+	diskContent := []byte("# DISK CONTENT\nDB_HOST=localhost\n")
+	if err := os.WriteFile(".env", diskContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	diskHash := hashBytesForTest(diskContent)
+
+	m := &Manifest{
+		Version: 1,
+		Files: map[string]ManifestEntry{
+			".env": {
+				Path:         ".env",
+				SHA256:       diskHash,
+				Origin:       OriginScaffold,
+				TemplatePath: "common/env.tmpl",
+				Source:       "pack:express@1.0.0",
+			},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolver returns not-installed for any pack.
+	resolver := &fakeResolver{
+		resolve: func(name, version string) (packs.PackInfo, error) {
+			return packs.PackInfo{}, oops.
+				Code(packs.CodePackNotInstalled).
+				Errorf("pack %q is not installed", name+"@"+version)
+		},
+	}
+
+	// Capture stderr to verify warning message.
+	oldErr := ui.Out
+	defer func() { ui.Out = oldErr }()
+	var stderr bytes.Buffer
+	ui.Out = &stderr
+
+	plan, err := Upgrade(cfg, WithResolver(resolver))
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	protected := plan.CountBy(ClassProtected)
+	if protected != 1 {
+		t.Fatalf("protected count = %d, want 1. Plan: %+v", protected, plan.Files)
+	}
+
+	f := plan.Files[0]
+	if f.Classification != ClassProtected {
+		t.Errorf("classification = %q, want protected", f.Classification)
+	}
+	if f.Path != ".env" {
+		t.Errorf("path = %q, want .env", f.Path)
+	}
+
+	// Warning must mention the pack name and version.
+	warnOutput := stderr.String()
+	if !strings.Contains(warnOutput, "express") {
+		t.Errorf("warning should mention pack name 'express', got: %s", warnOutput)
+	}
+	if !strings.Contains(warnOutput, "1.0.0") {
+		t.Errorf("warning should mention version '1.0.0', got: %s", warnOutput)
+	}
+}
+
+// TestUpgrade_PackSource_VersionBumpProtected verifies that when the recorded
+// pack version is no longer installed, the entries are protected — no
+// auto-substitution to a newer installed version.
+func TestUpgrade_PackSource_VersionBumpProtected(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName: ".",
+		ModuleName:  "github.com/test/version-bump",
+	}
+
+	diskContent := []byte("# DISK V1\n")
+	if err := os.WriteFile(".env", diskContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	diskHash := hashBytesForTest(diskContent)
+
+	m := &Manifest{
+		Version: 1,
+		Files: map[string]ManifestEntry{
+			".env": {
+				Path:         ".env",
+				SHA256:       diskHash,
+				Origin:       OriginScaffold,
+				TemplatePath: "common/env.tmpl",
+				Source:       "pack:express@1.0.0",
+			},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Only v1.1.0 is installed; v1.0.0 was removed (version bump scenario).
+	resolver := &fakeResolver{
+		resolve: func(name, version string) (packs.PackInfo, error) {
+			// v1.0.0 is gone — only v1.1.0 exists
+			if name == "express" && version == "1.1.0" {
+				pd := createPackTemplateDir(t, "express", "1.1.0", "common/env.tmpl", "# V1.1\n")
+				return packs.PackInfo{
+					Dir: pd,
+					Manifest: &packs.Manifest{
+						Name:    "express",
+						Version: "1.1.0",
+					},
+				}, nil
+			}
+			return packs.PackInfo{}, oops.
+				Code(packs.CodePackNotInstalled).
+				Errorf("pack %q is not installed", name+"@"+version)
+		},
+	}
+
+	plan, err := Upgrade(cfg, WithResolver(resolver))
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	// Must be PROTECTED — version 1.0.0 is not installed.
+	protected := plan.CountBy(ClassProtected)
+	if protected != 1 {
+		t.Fatalf("protected count = %d, want 1. Plan: %+v", protected, plan.Files)
+	}
+
+	f := plan.Files[0]
+	if f.Classification != ClassProtected {
+		t.Errorf("classification = %q, want protected (no auto-substitute to v1.1.0)", f.Classification)
+	}
+
+	// Upgrade must NOT silently re-render from v1.1.0 — the plan file count
+	// is exactly 1 (protected) and upgradable is 0.
+	upgradable := plan.CountBy(ClassUpgradable)
+	if upgradable != 0 {
+		t.Errorf("upgradable count = %d, want 0 (no auto-substitute)", upgradable)
+	}
+}
+
+// TestUpgrade_PackSource_NonPackEntriesUnchanged verifies that entries
+// without a Source field are processed normally through the existing
+// chain (local > global > embedded), with no pack-specific behavior.
+func TestUpgrade_PackSource_NonPackEntriesUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env")
+
+	// Create local template override to trigger upgradable
+	localDir := filepath.Join(".go-arch", "templates", "common")
+	if err := os.MkdirAll(localDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	v2Content := "# V2 LOCAL OVERRIDE\nDB_HOST=override\n"
+	if err := os.WriteFile(filepath.Join(localDir, "env.tmpl"), []byte(v2Content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolver always errors — should not be called for non-pack entries.
+	resolver := &fakeResolver{
+		resolve: func(name, version string) (packs.PackInfo, error) {
+			t.Error("resolver should NOT be called for entries without Source")
+			return packs.PackInfo{}, fmt.Errorf("unexpected call")
+		},
+	}
+
+	plan, err := Upgrade(cfg, WithResolver(resolver))
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	// Non-pack entry should still be upgradable via local override.
+	upgradable := plan.CountBy(ClassUpgradable)
+	if upgradable != 1 {
+		t.Fatalf("upgradable count = %d, want 1 (non-pack entry should upgrade normally)", upgradable)
 	}
 }
 

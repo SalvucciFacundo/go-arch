@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"go-arch/internal/pkg/template"
 	"go-arch/internal/ui"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	gotemplate "text/template"
 )
 
 // ──────────────────────────────────────────────────────────
@@ -67,8 +69,14 @@ func hashBytes(data []byte) string {
 // Root resolution: root is ALWAYS "." (CWD = project root). Upgrade runs from
 // inside the project; --project-path does chdir before Upgrade is called.
 // cfg.ProjectName is the project name metadata, NOT a directory path (ADR-7).
-func Upgrade(cfg *ui.ProjectConfig) (*UpgradePlan, error) {
+func Upgrade(cfg *ui.ProjectConfig, opts ...UpgradeOption) (*UpgradePlan, error) {
 	root := "." // ADR-7: always CWD
+
+	// Resolve upgrade options.
+	uc := &upgradeConfig{}
+	for _, opt := range opts {
+		opt(uc)
+	}
 
 	if !ManifestExists(root) {
 		return upgradeLegacy(cfg, root)
@@ -153,6 +161,46 @@ func Upgrade(cfg *ui.ProjectConfig) (*UpgradePlan, error) {
 				action.Classification = ClassUpgradable
 			} else {
 				continue
+			}
+			plan.Files = append(plan.Files, action)
+			continue
+		}
+
+		// ── Pack-source re-render ──
+		// When an entry was originally generated from a pack, re-render
+		// directly from the recorded pack directory. MUST NOT fall back
+		// to any other source (design: "force pack path").
+		if entry.Source != "" && strings.HasPrefix(entry.Source, "pack:") {
+			if uc.resolver != nil {
+				packName, packVersion := parsePackSource(entry.Source)
+				packInfo, resolveErr := uc.resolver.Resolve(packName, packVersion)
+				if resolveErr != nil {
+					// Pack recorded in Source is not installed → PROTECTED.
+					ui.Warning(fmt.Sprintf("pack %q is not installed; entries protected", packName+"@"+packVersion))
+					action.Classification = ClassProtected
+					plan.Files = append(plan.Files, action)
+					continue
+				}
+				// Re-render from pack directory directly (bypass chain).
+				rerender, err := renderPackEntry(packInfo.Dir, entry, cfg, m)
+				if err != nil {
+					// Template missing or render error → PROTECTED (can't safely re-render).
+					action.Classification = ClassProtected
+					plan.Files = append(plan.Files, action)
+					continue
+				}
+				rerenderHash := hashBytes(rerender)
+				action.RerenderHash = rerenderHash
+				action.RerenderBytes = rerender
+				if diskHash != rerenderHash {
+					action.Classification = ClassUpgradable
+				} else {
+					// up-to-date: OMIT from plan
+					continue
+				}
+			} else {
+				// No resolver configured → can't re-render from pack → PROTECTED.
+				action.Classification = ClassProtected
 			}
 			plan.Files = append(plan.Files, action)
 			continue
@@ -268,6 +316,41 @@ func buildRenderData(cfg *ui.ProjectConfig, entry ManifestEntry, m *Manifest) in
 		}
 	}
 	return cfg
+}
+
+// renderPackEntry re-renders a manifest entry from the pack directory DIRECTLY,
+// bypassing the local/global/embedded chain. The pack template at
+// <packDir>/templates/<TemplatePath> is parsed and executed in isolation.
+func renderPackEntry(packDir string, entry ManifestEntry, cfg *ui.ProjectConfig, m *Manifest) ([]byte, error) {
+	tmplPath := filepath.Join(packDir, "templates", entry.TemplatePath)
+	tmplBytes, err := os.ReadFile(tmplPath)
+	if err != nil {
+		return nil, err
+	}
+
+	tmpl, err := gotemplate.New(entry.TemplatePath).Parse(string(tmplBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	data := buildRenderData(cfg, entry, m)
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// parsePackSource extracts name and version from a Source value like
+// "pack:express@1.0.0". Returns ("express", "1.0.0").
+func parsePackSource(source string) (name, version string) {
+	rest := strings.TrimPrefix(source, "pack:")
+	// Split at the LAST "@" — versions cannot contain "@", but names might
+	// (scoped packs). For now, split at first "@" from the end.
+	if idx := strings.LastIndex(rest, "@"); idx >= 0 {
+		return rest[:idx], rest[idx+1:]
+	}
+	return rest, ""
 }
 
 // ──────────────────────────────────────────────────────────

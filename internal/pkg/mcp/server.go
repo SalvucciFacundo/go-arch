@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-arch/internal/pkg/hooks"
+	"go-arch/internal/pkg/packs"
 	"go-arch/internal/pkg/scaffold"
 	"go-arch/internal/pkg/validator"
 	"go-arch/internal/ui"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 
 	"github.com/spf13/viper"
@@ -132,7 +134,7 @@ func handleRequest(req *Request) {
 							"architecture": map[string]interface{}{
 								"type":        "string",
 								"enum":        []string{"Minimalist", "Standard", "Hexagonal"},
-								"description": "Clean architecture layout",
+								"description": "Clean architecture layout (optional when template is set)",
 							},
 							"dbDriver": map[string]interface{}{
 								"type":        "string",
@@ -160,8 +162,12 @@ func handleRequest(req *Request) {
 								"type":        "boolean",
 								"description": "Generate a server-rendered templ + HTMX frontend (views, static assets, web-aware main)",
 							},
+							"template": map[string]interface{}{
+								"type":        "string",
+								"description": "Installed template pack name (e.g. 'express' or 'express@1.0.0'). When set, architecture is optional.",
+							},
 						},
-						"required": []string{"projectName", "moduleName", "architecture"},
+						"required": []string{"projectName", "moduleName"},
 					},
 				},
 				map[string]interface{}{
@@ -287,6 +293,7 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			ObservabilityBackend string `json:"observabilityBackend"`
 			UseGRPC              bool   `json:"useGRPC"`
 			UseTemplHTMX         bool   `json:"useTemplHTMX"`
+			Template             string `json:"template"`
 		}
 		if err := json.Unmarshal(arguments, &args); err != nil {
 			sendError(id, -32602, "Invalid tool arguments", err.Error())
@@ -295,6 +302,50 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 
 		if args.DBDriver == "" {
 			args.DBDriver = "None"
+		}
+
+		// P3: architecture is optional when template is present.
+		if args.Template == "" && args.Architecture == "" {
+			sendToolResult(id, "architecture is required when template is not set", true)
+			return
+		}
+
+		var packInfo *packs.PackInfo
+		if args.Template != "" {
+			name, version, err := packs.ParseRef(args.Template)
+			if err != nil {
+				sendToolResult(id, fmt.Sprintf("Invalid pack ref: %v", err), true)
+				return
+			}
+			if err := packs.ValidateSlug(name); err != nil {
+				sendToolResult(id, fmt.Sprintf("Invalid pack name: %v", err), true)
+				return
+			}
+			if version == "" {
+				latest, lErr := packs.LatestInstalled(name)
+				if lErr != nil {
+					sendToolResult(id, fmt.Sprintf("Pack %q is not installed", name), true)
+					return
+				}
+				version = latest
+			}
+			dir := packs.Path(name, version)
+			m, mErr := packs.Load(dir)
+			if mErr != nil {
+				sendToolResult(id, fmt.Sprintf("Failed to load pack %q: %v", name, mErr), true)
+				return
+			}
+
+			// G4: empty-templates check before scaffold
+			templatesDir := filepath.Join(dir, "templates")
+			entries, readErr := os.ReadDir(templatesDir)
+			if readErr != nil || len(entries) == 0 {
+				sendToolResult(id, fmt.Sprintf("Pack %q has no templates", name), true)
+				return
+			}
+
+			pi := packs.PackInfo{Dir: dir, Manifest: m}
+			packInfo = &pi
 		}
 
 		cfg := &ui.ProjectConfig{
@@ -308,17 +359,33 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			UseGRPC:              args.UseGRPC,
 			UseTemplHTMX:         args.UseTemplHTMX,
 		}
+		if packInfo != nil {
+			cfg.Template = packInfo.Manifest.Name
+		}
 
 		hooksCfg, hErr := hooks.Load(hooks.ResolveConfigPath())
 		if hErr != nil {
 			sendToolResult(id, fmt.Sprintf("Failed to load hooks config: %v", hErr), true)
 			return
 		}
+
+		// Pack hooks: honor the sidecar's HooksEnabled flag set at install time.
+		if packInfo != nil && len(packInfo.Manifest.Hooks) > 0 {
+			sc, scErr := packs.ReadSidecar(packInfo.Dir)
+			if scErr == nil && sc.HooksEnabled {
+				for hookType, entries := range packInfo.Manifest.Hooks {
+					hooksCfg.Hooks[hookType] = append(hooksCfg.Hooks[hookType], entries...)
+				}
+			}
+		}
 		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
-		scaffolder := scaffold.NewScaffolder(cfg,
-			scaffold.WithRunner(runner),
-			scaffold.WithVersion(Version),
-		)
+
+		var scaffOpts []scaffold.ScaffoldOption
+		scaffOpts = append(scaffOpts, scaffold.WithRunner(runner), scaffold.WithVersion(Version))
+		if packInfo != nil {
+			scaffOpts = append(scaffOpts, scaffold.WithPackInfo(*packInfo))
+		}
+		scaffolder := scaffold.NewScaffolder(cfg, scaffOpts...)
 		if err := scaffolder.Execute(); err != nil {
 			sendToolResult(id, fmt.Sprintf("Error building project: %v", err), true)
 			return
@@ -603,7 +670,7 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			UseTemplHTMX:         viper.GetBool("use_templ_htmx"),
 		}
 
-		plan, err := scaffold.Upgrade(cfg)
+		plan, err := scaffold.Upgrade(cfg, scaffold.WithResolver(scaffold.DefaultResolver{}))
 		if err != nil {
 			sendToolResult(id, fmt.Sprintf("Upgrade failed: %v", err), true)
 			return
