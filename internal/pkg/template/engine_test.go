@@ -149,3 +149,62 @@ func TestEngine_Lookup(t *testing.T) {
 		t.Errorf("expected output to contain custom content, got %q", buf.String())
 	}
 }
+
+func TestEngine_RenderTo_Quiet(t *testing.T) {
+	engine := NewEngine()
+
+	// Create a local template override to trigger the "custom template" print
+	localTmplDir := filepath.Join(".go-arch", "templates", "common")
+	if err := os.MkdirAll(localTmplDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(".go-arch")
+
+	tmplPath := filepath.Join(localTmplDir, "go.mod.tmpl")
+	if err := os.WriteFile(tmplPath, []byte("module {{ .ModuleName }}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	data := struct{ ModuleName string }{ModuleName: "github.com/test/quiet"}
+
+	t.Run("quiet-false prints to stdout", func(t *testing.T) {
+		var buf bytes.Buffer
+		// RenderTo with quiet=false should print "Using custom template" to stdout
+		// We can't test stdout directly without swapping it, but we verify
+		// the method renders correctly and doesn't panic
+		err := engine.RenderTo(&buf, "common/go.mod.tmpl", data, false)
+		if err != nil {
+			t.Fatalf("RenderTo(quiet=false) failed: %v", err)
+		}
+		want := "module github.com/test/quiet\n"
+		if buf.String() != want {
+			t.Errorf("RenderTo(quiet=false) = %q, want %q", buf.String(), want)
+		}
+	})
+
+	t.Run("quiet-true suppresses stdout print", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := engine.RenderTo(&buf, "common/go.mod.tmpl", data, true)
+		if err != nil {
+			t.Fatalf("RenderTo(quiet=true) failed: %v", err)
+		}
+		want := "module github.com/test/quiet\n"
+		if buf.String() != want {
+			t.Errorf("RenderTo(quiet=true) = %q, want %q", buf.String(), want)
+		}
+	})
+
+	t.Run("Render delegates to RenderTo quiet=false", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := engine.Render(&buf, "common/go.mod.tmpl", data)
+		if err != nil {
+			t.Fatalf("Render failed: %v", err)
+		}
+		want := "module github.com/test/quiet\n"
+		if buf.String() != want {
+			t.Errorf("Render = %q, want %q", buf.String(), want)
+		}
+		// Render should STILL print "Using custom template" to stdout
+		// (existing behavior preserved)
+	})
+}

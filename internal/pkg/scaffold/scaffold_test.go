@@ -720,6 +720,206 @@ func TestHandlerFunctional(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────
+// Phase 2 — manifest recording (upgrade-project, strict TDD)
+// ──────────────────────────────────────────────────────────
+
+// TestManifest_NewRecordsScaffoldEntries verifies task 1.6: scaffolding a new
+// project records every createFile and createBinaryFile write in the manifest
+// with matching sha256 hashes.
+func TestManifest_NewRecordsScaffoldEntries(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "manifest-new-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	config := &ui.ProjectConfig{
+		ProjectName:      "TestApp",
+		ModuleName:       "github.com/test/app",
+		Architecture:     "Minimalist",
+		UseTemplHTMX:     true,
+		UseObservability: true,
+		UseGRPC:          true,
+		UseDocker:        true,
+	}
+
+	scaffolder := NewScaffolder(config)
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	projectRoot := filepath.Join(tempDir, "TestApp")
+	manifestPath := ManifestPath(projectRoot)
+	if !ManifestExists(projectRoot) {
+		t.Fatalf("manifest not found at %s", manifestPath)
+	}
+
+	m, err := LoadManifest(projectRoot)
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
+	}
+
+	if len(m.Files) == 0 {
+		t.Fatal("manifest has no entries after scaffold")
+	}
+
+	// Every file written by createFile or createBinaryFile must have a matching
+	// manifest entry with correct sha256.
+	for path, entry := range m.Files {
+		fullPath := filepath.Join(projectRoot, path)
+		diskHash, hashErr := hashFile(fullPath)
+		if hashErr != nil {
+			t.Errorf("cannot hash %s: %v", fullPath, hashErr)
+			continue
+		}
+		if entry.SHA256 != diskHash {
+			t.Errorf("%s: manifest sha256 %q != disk sha256 %q", path, entry.SHA256, diskHash)
+		}
+
+		// Check origin classification
+		if strings.HasSuffix(path, "htmx.min.js") {
+			if entry.Origin != OriginBinary {
+				t.Errorf("%s: origin = %q, want binary", path, entry.Origin)
+			}
+		} else {
+			if entry.Origin != OriginScaffold {
+				t.Errorf("%s: origin = %q, want scaffold", path, entry.Origin)
+			}
+		}
+	}
+
+	// Verify specific expected files are in the manifest
+	expectedFiles := []string{
+		"main.go",
+		"go.mod",
+		".go-arch.yaml",
+		".env",
+		"static/js/htmx.min.js",
+	}
+	for _, f := range expectedFiles {
+		if _, ok := m.Files[f]; !ok {
+			t.Errorf("expected file %q in manifest, but not found", f)
+		}
+	}
+
+	t.Logf("Manifest recorded %d entries", len(m.Files))
+}
+
+// TestManifest_GenerateComponentRecords verifies that GenerateComponent
+// records entries with origin: component and metadata entity_name.
+func TestManifest_GenerateComponentRecords(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "manifest-comp-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/compapp",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.GenerateComponent("page", "Dashboard")
+	if err != nil {
+		t.Fatalf("GenerateComponent failed: %v", err)
+	}
+
+	m, err := LoadManifest(".")
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
+	}
+
+	targetPath := "views/pages/dashboard.templ"
+	entry, ok := m.Files[targetPath]
+	if !ok {
+		t.Fatalf("expected manifest entry for %s", targetPath)
+	}
+	if entry.Origin != OriginComponent {
+		t.Errorf("entry origin = %q, want component", entry.Origin)
+	}
+	if entry.Metadata["entity_name"] != "Dashboard" {
+		t.Errorf("metadata entity_name = %q, want Dashboard", entry.Metadata["entity_name"])
+	}
+
+	// Verify sha256 matches disk
+	diskHash, err := hashFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.SHA256 != diskHash {
+		t.Errorf("manifest sha256 %q != disk sha256 %q", entry.SHA256, diskHash)
+	}
+}
+
+// TestManifest_GenerateCRUDRecords verifies that GenerateCRUD records entries
+// with origin: crud and metadata entity_name for all generated files.
+func TestManifest_GenerateCRUDRecords(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "manifest-crud-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/crudapp",
+		Architecture: "Hexagonal",
+	}
+
+	scaffolder := NewScaffolder(config)
+	err = scaffolder.GenerateCRUD("Order")
+	if err != nil {
+		t.Fatalf("GenerateCRUD failed: %v", err)
+	}
+
+	m, err := LoadManifest(".")
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
+	}
+
+	if len(m.Files) == 0 {
+		t.Fatal("manifest has no entries after GenerateCRUD")
+	}
+
+	for targetPath, entry := range m.Files {
+		if entry.Origin != OriginCrud {
+			t.Errorf("%s: origin = %q, want crud", targetPath, entry.Origin)
+		}
+		if entry.Metadata["entity_name"] != "Order" {
+			t.Errorf("%s: metadata entity_name = %q, want Order", targetPath, entry.Metadata["entity_name"])
+		}
+
+		diskHash, hashErr := hashFile(targetPath)
+		if hashErr != nil {
+			t.Errorf("cannot hash %s: %v", targetPath, hashErr)
+			continue
+		}
+		if entry.SHA256 != diskHash {
+			t.Errorf("%s: manifest sha256 %q != disk sha256 %q", targetPath, entry.SHA256, diskHash)
+		}
+	}
+
+	t.Logf("GenerateCRUD recorded %d entries", len(m.Files))
+}
+
+// ──────────────────────────────────────────────────────────
 // Phase 2 — page/component generation (Strict TDD)
 // ──────────────────────────────────────────────────────────
 
