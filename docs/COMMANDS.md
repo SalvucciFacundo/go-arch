@@ -68,8 +68,23 @@ Validates the project's **Architectural Health**. This command is intended to be
 
 Launches the Model Context Protocol (MCP) server over standard I/O (stdio).
 - **JSON-RPC 2.0**: Implements the MCP protocol for seamless integration with AI coding agents (such as OpenCode or Claude Desktop).
-- **Tool definitions**: Exposes the key capabilities (`new_project`, `generate_component`, `check_architecture`) directly as MCP tools with formal input schemas.
 - **Stderr Routing**: Automatically redirects standard UI logs to stderr to protect the integrity of the JSON-RPC stdout communication channel.
+
+### MCP Tools
+
+Every CLI command has a corresponding MCP tool for agents:
+
+| CLI command | MCP tool | Purpose |
+|---|---|---|
+| `go-arch new` | `new_project` | Scaffold a new project with layout, DB, Docker, observability, gRPC, and templ+HTMX options |
+| `go-arch generate` | `generate_component` | Generate service/repository/handler/crud/page/component |
+| `go-arch check` | `check_architecture` | Validate the project structure and import rules |
+| `go-arch serve` | `serve_project` | Return the exact run command (`air` or `go run <mainPath>`) — agents never start a long-running server over MCP |
+| `go-arch setup` | `setup_environment` | Detect Go/air presence; with `install: true` installs only `air` (user-level, no sudo). The Go toolchain itself is never installed by the tool |
+
+`serve_project` is check-only by design: MCP is request/response, so a tool that blocks on a live server would hang the agent. Agents run the returned command themselves and test the project over HTTP.
+
+`setup_environment` follows a consent pattern: the agent asks the human for permission, then calls with `install: true` (installs `air`) or hands the exact install command over.
 
 ---
 
