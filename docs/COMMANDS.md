@@ -73,7 +73,14 @@ Launches the Model Context Protocol (MCP) server over standard I/O (stdio).
 
 ---
 
-## 7. Metadata System (`.go-arch.yaml`) 📄
+## 7. `version` 🏷️
+**Usage**: `go-arch version`
+
+Prints the build version. When built via GoReleaser (tagged release), the version is injected automatically. Local development builds print `dev`.
+
+---
+
+## 8. Metadata System (`.go-arch.yaml`) 📄
 
 The CLI is stateless, meaning it doesn't store your project data in a database. Instead, it uses this YAML file as the **Source of Truth**.
 - **Architecture Locking**: Prevents generating components that don't match the project's initial architecture.

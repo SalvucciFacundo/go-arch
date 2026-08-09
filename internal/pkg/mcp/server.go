@@ -304,8 +304,11 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 		if args.ProjectPath != "" {
 			oldWd, err := os.Getwd()
 			if err == nil {
-				defer os.Chdir(oldWd)
-				os.Chdir(args.ProjectPath)
+				if chdirErr := os.Chdir(args.ProjectPath); chdirErr != nil {
+					sendError(id, -32602, "Cannot change to project directory", chdirErr.Error())
+					return
+				}
+				defer func() { _ = os.Chdir(oldWd) }()
 			}
 		}
 
@@ -352,8 +355,11 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 		if args.ProjectPath != "" {
 			oldWd, err := os.Getwd()
 			if err == nil {
-				defer os.Chdir(oldWd)
-				os.Chdir(args.ProjectPath)
+				if chdirErr := os.Chdir(args.ProjectPath); chdirErr != nil {
+					sendError(id, -32602, "Cannot change to project directory", chdirErr.Error())
+					return
+				}
+				defer func() { _ = os.Chdir(oldWd) }()
 			}
 		}
 
@@ -403,8 +409,11 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 		if args.ProjectPath != "" {
 			oldWd, err := os.Getwd()
 			if err == nil {
-				defer os.Chdir(oldWd)
-				os.Chdir(args.ProjectPath)
+				if chdirErr := os.Chdir(args.ProjectPath); chdirErr != nil {
+					sendError(id, -32602, "Cannot change to project directory", chdirErr.Error())
+					return
+				}
+				defer func() { _ = os.Chdir(oldWd) }()
 			}
 		}
 

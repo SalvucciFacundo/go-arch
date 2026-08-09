@@ -17,8 +17,10 @@ func TestValidator_checkStructure(t *testing.T) {
 
 	// Change the working directory for the test
 	oldWd, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	defer os.Chdir(oldWd)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
 
 	config := &ui.ProjectConfig{
 		Architecture: "Hexagonal",
@@ -32,7 +34,9 @@ func TestValidator_checkStructure(t *testing.T) {
 	}
 
 	// Case 2: Create a folder -> Should have 2 errors
-	os.MkdirAll("internal/domain", 0755)
+	if err := os.MkdirAll("internal/domain", 0755); err != nil {
+		t.Fatal(err)
+	}
 	violations = v.checkStructure()
 	if len(violations) != 2 {
 		t.Errorf("Expected 2 structure violations, got %d", len(violations))

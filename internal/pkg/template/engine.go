@@ -70,8 +70,8 @@ func (e *Engine) getFuncMap() template.FuncMap {
 		"now": func() string {
 			return time.Now().Format("2006-01-02 15:04:05")
 		},
-		"lower": strings.ToLower,
-		"upper": strings.ToUpper,
+		"lower":  strings.ToLower,
+		"upper":  strings.ToUpper,
 		"plural": inflection.Plural,
 		"title": func(s string) string {
 			if len(s) == 0 {

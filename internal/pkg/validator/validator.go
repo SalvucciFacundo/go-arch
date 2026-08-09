@@ -104,7 +104,7 @@ func (v *Validator) applyArchitectureRules(path string, imports []*ast.ImportSpe
 
 	for _, imp := range imports {
 		importPath := strings.Trim(imp.Path.Value, "\"")
-		
+
 		// We are only interested in the project's own internal imports
 		if !strings.HasPrefix(importPath, modulePrefix) {
 			continue
