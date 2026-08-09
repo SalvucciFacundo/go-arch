@@ -183,3 +183,140 @@ None — implementation matches design.md exactly:
 None.
 
 ## Next: Slice 5 — upgrade pack-source + docs (PR 5)
+
+---
+
+## Slice 5 — upgrade pack-source + docs (PR 5): COMPLETE
+
+**Branch**: feat/packs-5 → feat/packs-4 (feature-branch-chain)
+**Mode**: Strict TDD
+**Status**: Slice 5 COMPLETE — ALL slices done
+
+- [x] 5.1 RED: upgrade_test.go — 4 pack-source upgrade tests
+- [x] 5.2 GREEN: upgrade_opts.go + upgrade.go — UpgradeOption, WithResolver, pack re-render
+- [x] 5.3 GREEN: docs/packs.md — contract v1 reference
+- [x] 5.4 Verify: go test ./... + go vet ./... + gofmt — ALL GREEN
+
+### Files (Slice 5): 4 files, ~458 lines
+
+| File | Lines | Description |
+|------|-------|-------------|
+| `internal/pkg/scaffold/upgrade_opts.go` | 18 | UpgradeOption + WithResolver |
+| `internal/pkg/scaffold/upgrade.go` | +85/-1 | Variadic Upgrade, pack-source re-render, renderPackEntry, parsePackSource |
+| `internal/pkg/scaffold/upgrade_test.go` | +356 | 4 tests: pack re-render, missing pack, version bump, non-pack unchanged |
+| `docs/packs.md` | 165 | Contract v1 schema, lookup precedence, upgrade interaction, trust warning |
+
+### Commits (Slice 5)
+- `e29443c` feat(upgrade): re-render pack-sourced entries and protect missing packs
+- `d83709e` docs(packs): add pack contract reference
+
+## TDD Cycle Evidence
+
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| 5.1 pack upgrade tests | upgrade_test.go | Unit | ✅ 22/22 existing | ✅ Written (compile fail) | ✅ Passed | ✅ 4 cases | ✅ Clean |
+| 5.2 upgrade_opts + upgrade | — | Unit | — | — | ✅ Passes 5.1 | — | ✅ Clean |
+| 5.3 docs/packs.md | — | N/A | N/A | N/A | N/A | ➖ Structural | ➖ None needed |
+
+### Test Summary
+- **Total tests written (Slice 5)**: 4 new (pack source + missing pack + version bump + non-pack unchanged)
+- **Total tests passing**: All packages green
+- **Layers used**: Unit (all)
+- **Triangulation**: 4 distinct scenarios (happy path, missing, version bump, non-pack)
+
+## Work Unit Evidence
+
+| Unit | Commit | Focused test | Harness | Rollback |
+|------|--------|-------------|---------|----------|
+| 1 | `e29443c` | go test ./internal/pkg/scaffold/ -run TestUpgrade_PackSource — 4/4 PASS | N/A (unit) | delete upgrade_opts.go, revert upgrade.go changes, revert upgrade_test.go additions |
+| 2 | `d83709e` | N/A (docs only) | N/A (docs) | delete docs/packs.md |
+
+## Deviations from Design
+None — implementation matches design.md exactly:
+- WithResolver(Resolver) UpgradeOption per design decision F3
+- Upgrade() variadic, backward-compatible per design
+- Pack re-render bypasses the chain — reads from packDir/templates/<TemplatePath> directly
+- Missing pack → ClassProtected + ui.Warning per design
+- No auto-substitute: recorded version is what re-renders, not latest installed
+- renderPackEntry uses text/template directly (no embedded, no local, no global)
+- Non-pack entries (no Source field) unchanged — full chain applies
+
+## Issues Found
+None.
+
+## ALL SLICES COMPLETE — Ready for sdd-verify
+
+---
+
+## CORRECTIVE FIX — verify findings (2026-08-09)
+
+**Branch**: feat/packs-5
+**Mode**: Standard (fixes only, no new TDD cycle)
+**Status**: COMPLETE
+
+### Findings Fixed
+
+- [x] **CRITICAL #1**: Pack-declared hooks now fire on `new --template`
+  - `cmd/new.go`: merges pack manifest hooks into runner when sidecar `HooksEnabled` is true
+  - `mcp/server.go`: same merge in new_project handler
+  - `packs/sidecar.go`: exported ReadSidecar (was readSidecar)
+  - `packs/install.go`: updated internal caller
+
+- [x] **CRITICAL #2**: `go-arch upgrade` now re-renders pack-sourced entries
+  - `cmd/upgrade.go`: passes `WithResolver(scaffold.DefaultResolver{})` to `Upgrade()`
+  - `mcp/server.go`: same wiring in upgrade_project handler
+
+- [x] **PARTIAL #3**: Missing-pack warning now reaches production
+  - Fixed together with CRITICAL #2 (resolver branch is reached; Warning prints)
+
+- [x] **PARTIAL #4**: ResolveBinary documented
+  - `scaffold.go`: DESIGN NOTE in createPackBinary explaining why pack-scaffold reads directly
+    from pack dir (G3: pack dir authoritative). ResolveBinary remains for engine-level callers.
+
+- [x] **PARTIAL #5**: config.tmpl commented template example
+  - Added `# Template pack` comment block with `# template: <pack-name>` example
+  - Conditional template block preserved for when .Template is set
+
+- [x] **PARTIAL #6**: Error hint wording + not-installed test
+  - `cmd/new.go`: runNewWithTemplate error now includes `template install` hint
+  - `cmd/new_test.go`: TestNewTemplateNotInstalledHint verifies hint in error string
+
+### Production-Path Tests Added (4 new, 0 failures)
+
+| Test | File | What it proves |
+|------|------|----------------|
+| TestNewTemplatePackHooksFire/hooks-enabled | cmd/new_test.go | pack hook fires via runNewWithTemplate (RealRunner) |
+| TestNewTemplatePackHooksFire/hooks-disabled | cmd/new_test.go | HooksEnabled=false silences pack hook |
+| TestNewTemplateNotInstalledHint | cmd/new_test.go | error contains "template install" hint |
+| TestUpgradePackSourceProductionPath | cmd/upgrade_test.go | upgrade --dry-run classifies pack-source entry as UPGRADABLE |
+
+### Files Changed (corrective fix)
+
+| File | Lines | Description |
+|------|-------|-------------|
+| `cmd/new.go` | +18/-1 | Pack hooks merge + error hint |
+| `cmd/new_test.go` | +193/-0 | 3 production-path pack hook tests |
+| `cmd/upgrade.go` | +2/-2 | WithResolver wiring + displayPlan label |
+| `cmd/upgrade_test.go` | +109/-0 | 1 production-path upgrade test |
+| `internal/pkg/mcp/server.go` | +12/-1 | Pack hooks merge + WithResolver wiring |
+| `internal/pkg/packs/sidecar.go` | +4/-2 | Export ReadSidecar |
+| `internal/pkg/packs/install.go` | +1/-1 | ReadSidecar call update |
+| `internal/pkg/scaffold/scaffold.go` | +9/-0 | ResolveBinary DESIGN NOTE |
+
+### Commits
+
+- `67e13da` fix(packs): fire pack hooks and wire upgrade resolver in production paths
+- `67030fe` test(packs): production-path hooks and upgrade re-render
+
+### Build & Test Evidence
+
+```
+go build ./...  →  OK (exit 0)
+go vet ./...    →  OK (exit 0, no warnings)
+gofmt -l .      →  OK (no files listed)
+go test ./...   →  ALL 7 packages PASS (0 failures)
+```
+
+### Next Recommended
+
+Re-run verify phase to confirm all 31/31 requirements and 76/76 scenarios pass.
