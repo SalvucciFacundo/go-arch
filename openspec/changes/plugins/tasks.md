@@ -43,43 +43,43 @@ Files: `internal/pkg/packs/{manifest,paths,errors,info}.go` + `manifest_test.go`
 
 Files: `internal/pkg/packs/{download,copy,sidecar,install}.go` + `install_test.go`. Est: ~700. Risk: Medium.
 
-- [ ] 2.1 RED: `install_test.go` (FakeDownloader) — success (copy→sidecar→re-validate), module-not-found→`pack_not_found` + no partial dir, offline→`pack_fetch_failed` surfaced, corrupted ziphash abort→no dir, idempotent same-version reinstall, `templates/` missing→`pack_no_templates`, hooks accept→`HooksEnabled=true` / decline→`false`
-- [ ] 2.2 GREEN: `download.go` — `Downloader` interface, `RealDownloader` (`exec.CommandContext` `go mod download -json <mod>@<ver>`, parse `downloadJSON{Dir,Error}`, stderr captured separately), `FakeDownloader` (hooks `FakeRunner` precedent, in-package)
-- [ ] 2.3 GREEN: `copy.go` — `copyDir(src,dst)` via stdlib `WalkDir`, Windows-safe (filepath only, no shell)
-- [ ] 2.4 GREEN: `sidecar.go` — `Sidecar{HooksEnabled bool; InstalledAt time.Time}` read/write of `pack.json` in installed pack dir
-- [ ] 2.5 GREEN: `install.go` — `Install(module, version)` per design flow: Download→LoadManifest→templates/ exists check→hooks trust prompt (injectable confirm func; default `ui.Warning` + `survey.AskOne`)→`RemoveAll(dst)` if exists→copyDir to tmp→`Rename(tmp,dst)`→writeSidecar→re-validate→cleanup dst on failure; `Remove(name,ver)`, `List()` sorted, `Update(name)` (re-fetch `@latest`, re-prompt hooks)
-- [ ] 2.6 Verify: `go test ./internal/pkg/packs/` + vet green
+- [x] 2.1 RED: `install_test.go` (FakeDownloader) — success (copy→sidecar→re-validate), module-not-found→`pack_not_found` + no partial dir, offline→`pack_fetch_failed` surfaced, corrupted ziphash abort→no dir, idempotent same-version reinstall, `templates/` missing→`pack_no_templates`, hooks accept→`HooksEnabled=true` / decline→`false`
+- [x] 2.2 GREEN: `download.go` — `Downloader` interface, `RealDownloader` (`exec.CommandContext` `go mod download -json <mod>@<ver>`, parse `downloadJSON{Dir,Error}`, stderr captured separately), `FakeDownloader` (hooks `FakeRunner` precedent, in-package)
+- [x] 2.3 GREEN: `copy.go` — `copyDir(src,dst)` via stdlib `WalkDir`, Windows-safe (filepath only, no shell)
+- [x] 2.4 GREEN: `sidecar.go` — `Sidecar{HooksEnabled bool; InstalledAt time.Time}` read/write of `pack.json` in installed pack dir
+- [x] 2.5 GREEN: `install.go` — `Install(module, version)` per design flow: Download→LoadManifest→templates/ exists check→hooks trust prompt (injectable confirm func; default `ui.Warning` + `survey.AskOne`)→`RemoveAll(dst)` if exists→copyDir to tmp→`Rename(tmp,dst)`→writeSidecar→re-validate→cleanup dst on failure; `Remove(name,ver)`, `List()` sorted, `Update(name)` (re-fetch `@latest`, re-prompt hooks)
+- [x] 2.6 Verify: `go test ./internal/pkg/packs/` + vet green
 
 ## Slice 3 — template CLI group + engine chain (PR 3)
 
 Files: `cmd/template.go` + `cmd/template_{install,list,remove,update}.go` + `cmd/template_test.go`, `internal/pkg/template/engine.go` + `engine_pack_test.go`, `docs/COMMANDS.md`, `README.md`, `docs/ARCHITECTURE.md`. Est: ~750. Risk: Medium.
 
-- [ ] 3.1 RED: `engine_pack_test.go` — 4-step precedence: pack overrides embedded (source `pack:express@1.0.0`), local overrides pack, global overrides pack, pack miss→embedded, no pack configured→3-step unchanged; `ResolveBinary` same precedence via `Read()` closure
-- [ ] 3.2 GREEN: `engine.go` — `Engine` gains packsDir/packName/packVersion + `NewEngine(opts...)`; `WithPacksDir(dir)`, `WithPack(name,ver)`; `getTemplate` pack step between global and embedded (`filepath.Join(packsDir, name+"@"+ver, "templates", path)`, source `"pack:<name>@<version>"`); `ResolveBinary(path)(ResolvedSource,error)` with `SourceKind` consts (Local/Global/Pack/Embedded) + `Read func() ([]byte, error)`; replace `fmt.Printf` @48 → `fmt.Fprintf(ui.Out, ...)`
-- [ ] 3.3 GREEN: `cmd/template.go` — `go-arch template` parent command registering install/list/remove/update
-- [ ] 3.4 GREEN: `cmd/template_install.go` — parse `"<module>[@<version>]"` (default `@latest`), call `packs.Install`, report via `ui.Out`
-- [ ] 3.5 GREEN: `cmd/template_list.go` — `packs.List`, sorted output, `no packs installed` when empty, exit 0
-- [ ] 3.6 GREEN: `cmd/template_remove.go` — `packs.Remove(name[,ver])`, latest when bare, `pack "X" is not installed` error
-- [ ] 3.7 GREEN: `cmd/template_update.go` — `packs.Update(name)`, re-prompt hooks
-- [ ] 3.8 RED: `cmd/template_test.go` — `t.Setenv("HOME", t.TempDir())`: list empty→`no packs installed`; remove non-installed→`pack "express" is not installed`; install without module arg→arg error
-- [ ] 3.9 GREEN: docs — `docs/COMMANDS.md` `template install|list|remove|update` section; `README.md:134-137` + `docs/ARCHITECTURE.md:57-80` lookup order → four steps
-- [ ] 3.10 Verify: `go test ./...` + vet green
+- [x] 3.1 RED: `engine_pack_test.go` — 4-step precedence: pack overrides embedded (source `pack:express@1.0.0`), local overrides pack, global overrides pack, pack miss→embedded, no pack configured→3-step unchanged; `ResolveBinary` same precedence via `Read()` closure
+- [x] 3.2 GREEN: `engine.go` — `Engine` gains packsDir/packName/packVersion + `NewEngine(opts...)`; `WithPacksDir(dir)`, `WithPack(name,ver)`; `getTemplate` pack step between global and embedded (`filepath.Join(packsDir, name+"@"+ver, "templates", path)`, source `"pack:<name>@<version>"`); `ResolveBinary(path)(ResolvedSource,error)` with `SourceKind` consts (Local/Global/Pack/Embedded) + `Read func() ([]byte, error)`; replace `fmt.Printf` @48 → `fmt.Fprintf(ui.Out, ...)`
+- [x] 3.3 GREEN: `cmd/template.go` — `go-arch template` parent command registering install/list/remove/update
+- [x] 3.4 GREEN: `cmd/template_install.go` — parse `"<module>[@<version>]"` (default `@latest`), call `packs.Install`, report via `ui.Out`
+- [x] 3.5 GREEN: `cmd/template_list.go` — `packs.List`, sorted output, `no packs installed` when empty, exit 0
+- [x] 3.6 GREEN: `cmd/template_remove.go` — `packs.Remove(name[,ver])`, latest when bare, `pack "X" is not installed` error
+- [x] 3.7 GREEN: `cmd/template_update.go` — `packs.Update(name)`, re-prompt hooks
+- [x] 3.8 RED: `cmd/template_test.go` — `t.Setenv("HOME", t.TempDir())`: list empty→`no packs installed`; remove non-installed→`pack "express" is not installed`; install without module arg→arg error
+- [x] 3.9 GREEN: docs — `docs/COMMANDS.md` `template install|list|remove|update` section; `README.md:134-137` + `docs/ARCHITECTURE.md:57-80` lookup order → four steps
+- [x] 3.10 Verify: `go test ./...` + vet green
 
 ## Slice 4 — dispatch: new --template + MCP (PR 4)
 
 Files: `internal/pkg/scaffold/{scaffold,pack_resolver,manifest}.go` + `scaffold_pack_test.go`, `cmd/new.go` + `cmd/new_test.go`, `internal/ui/prompts.go`, `internal/pkg/hooks/{types,env}.go` + `env_test.go`, `internal/pkg/template/templates/common/config.tmpl`, `internal/pkg/mcp/server.go` + `server_test.go`. Est: ~760. Risk: High.
 
-- [ ] 4.1 RED: `scaffold_pack_test.go` E2E — fixture pack in `t.TempDir()` (pre-populated, no network): scaffoldPack generates files (strip `.tmpl`), layout dirs created, `.go-arch.yaml` contains `template: express`, manifest entries `source: pack:express@<ver>`, binary asset copied verbatim (origin `binary`), pack hooks fire (FakeRunner) with `PACK_NAME`/`PACK_VERSION`, project config has NO hooks block
-- [ ] 4.2 GREEN: `manifest.go` — `ManifestEntry.Source string yaml:"source,omitempty"`; `recordManifest` gains source param
-- [ ] 4.3 GREEN: `pack_resolver.go` — `Resolver` interface (`Resolve(name, ver) (packs.PackInfo, error)`) + default impl wrapping `packs.Path`/`LatestInstalled`; miss → `pack_not_installed`
-- [ ] 4.4 GREEN: `scaffold.go` — `packInfo` field + `WithPackInfo(packs.PackInfo)` option; `Execute` early-return pack branch → `s.scaffoldPack()` (before arch switch); `scaffoldPack()`: `MkdirAll(manifestDir)` + layout dirs, `fs.WalkDir(packDir/templates)` → strip `.tmpl` → `createFile(target, lookupKey, cfg)` → `recordManifest(Source="pack:<name>@<ver>")`; binary_assets loop → `createPackBinary(entry.Target, entry.Source, packDir)` via `ResolveBinary.Read()`; pre/post-new pack-scoped hooks; `WriteVersionField`
-- [ ] 4.5 GREEN: hooks `types.go`+`env.go` — `EnvContext` gains `PackName`/`PackVersion`; `BuildEnv` injects `PACK_NAME`/`PACK_VERSION` when non-empty; `env_test.go`: set→present, empty→absent
-- [ ] 4.6 GREEN: `cmd/new.go` — `--template` flag: bypass wizard, `ParseRef`→`LatestInstalled` if bare→`Resolver.Resolve`→empty-templates pre-check (`pack_no_templates`, NO dir created)→`packDefaults(projectName)` cfg→`cfg.Template=name`→`NewScaffolder(cfg, WithPackInfo, WithRunner, WithVersion)`
-- [ ] 4.7 GREEN: `prompts.go` — `ProjectConfig.Template string mapstructure:"template,omitempty"`; `config.tmpl` — commented `# template: <pack>` block
-- [ ] 4.8 RED: `cmd/new_test.go` — empty pack → error BEFORE `NewScaffolder`, assert `myapp/` NOT created
-- [ ] 4.9 GREEN: `mcp/server.go` — `new_project` schema gains optional `template`; remove `architecture` from static `required`; handler validates "architecture required unless template set"; resolves pack → `cfg.Template` + `WithPackInfo`
-- [ ] 4.10 RED: `mcp/server_test.go` — `new_project` with `template` (no architecture) → `cfg.Template` propagates; missing pack → `pack "express" is not installed`; without template → unchanged behavior
-- [ ] 4.11 Verify: `go test ./...` + vet + gofmt green
+- [x] 4.1 RED: `scaffold_pack_test.go` E2E — fixture pack in `t.TempDir()` (pre-populated, no network): scaffoldPack generates files (strip `.tmpl`), layout dirs created, `.go-arch.yaml` contains `template: express`, manifest entries `source: pack:express@<ver>`, binary asset copied verbatim (origin `binary`), pack hooks fire (FakeRunner) with `PACK_NAME`/`PACK_VERSION`, project config has NO hooks block
+- [x] 4.2 GREEN: `manifest.go` — `ManifestEntry.Source string yaml:"source,omitempty"`; `recordManifest` gains source param
+- [x] 4.3 GREEN: `pack_resolver.go` — `Resolver` interface (`Resolve(name, ver) (packs.PackInfo, error)`) + default impl wrapping `packs.Path`/`LatestInstalled`; miss → `pack_not_installed`
+- [x] 4.4 GREEN: `scaffold.go` — `packInfo` field + `WithPackInfo(packs.PackInfo)` option; `Execute` early-return pack branch → `s.scaffoldPack()` (before arch switch); `scaffoldPack()`: `MkdirAll(manifestDir)` + layout dirs, `fs.WalkDir(packDir/templates)` → strip `.tmpl` → `createFile(target, lookupKey, cfg)` → `recordManifest(Source="pack:<name>@<ver>")`; binary_assets loop → `createPackBinary(entry.Target, entry.Source, packDir)` via `ResolveBinary.Read()`; pre/post-new pack-scoped hooks; `WriteVersionField`
+- [x] 4.5 GREEN: hooks `types.go`+`env.go` — `EnvContext` gains `PackName`/`PackVersion`; `BuildEnv` injects `PACK_NAME`/`PACK_VERSION` when non-empty; `env_test.go`: set→present, empty→absent
+- [x] 4.6 GREEN: `cmd/new.go` — `--template` flag: bypass wizard, `ParseRef`→`LatestInstalled` if bare→`Resolver.Resolve`→empty-templates pre-check (`pack_no_templates`, NO dir created)→`packDefaults(projectName)` cfg→`cfg.Template=name`→`NewScaffolder(cfg, WithPackInfo, WithRunner, WithVersion)`
+- [x] 4.7 GREEN: `prompts.go` — `ProjectConfig.Template string mapstructure:"template,omitempty"`; `config.tmpl` — conditional `{{ if .Template }}template: {{ .Template }}{{ end }}` block
+- [x] 4.8 RED: `cmd/new_test.go` — empty pack → error BEFORE `NewScaffolder`, assert `myapp/` NOT created
+- [x] 4.9 GREEN: `mcp/server.go` — `new_project` schema gains optional `template`; remove `architecture` from static `required`; handler validates "architecture required unless template set"; resolves pack → `cfg.Template` + `WithPackInfo`
+- [x] 4.10 RED: `mcp/server_test.go` — `new_project` with `template` (no architecture) → `cfg.Template` propagates; missing pack → `pack "express" is not installed`; without template → unchanged behavior
+- [x] 4.11 Verify: `go test ./...` + vet + gofmt green
 
 ## Slice 5 — upgrade pack-source + docs (PR 5)
 
