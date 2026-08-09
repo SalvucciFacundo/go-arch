@@ -352,10 +352,26 @@ func TestRunner_CWD_Override(t *testing.T) {
 }
 
 func TestRunner_CommandNotFound(t *testing.T) {
+	// Object form: exec.ErrNotFound → hook_command_not_found.
 	cfg := &Config{Hooks: map[Type][]Entry{
 		PreNew: {{Command: "nonexistent-xyz", Shell: false}},
 	}}
 	fr := &FakeRunner{RunErr: exec.ErrNotFound, ExitCode: -1}
+	out := testStdout()
+	r := NewRunner(cfg, fr, out)
+
+	err := r.Fire(PreNew, EnvContext{}, "/tmp")
+	assertCode(t, err, CodeHookCommandNotFound)
+}
+
+func TestRunner_StringForm_CommandNotFound(t *testing.T) {
+	// String form via sh -c: sh exits 127 when the inner command is missing.
+	// The runner should map exit 127 to hook_command_not_found.
+	cfg := &Config{Hooks: map[Type][]Entry{
+		PreNew: {{Command: "definitely-not-a-real-binary-xyz", Shell: true}},
+	}}
+	// Simulate: sh finds the shell (exitCode 127, runErr from exec.ExitError).
+	fr := &FakeRunner{ExitCode: 127, RunErr: errors.New("exit status 127")}
 	out := testStdout()
 	r := NewRunner(cfg, fr, out)
 

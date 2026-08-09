@@ -2521,6 +2521,58 @@ func TestScaffolder_StopOnFirst_FailsPreNew(t *testing.T) {
 	}
 }
 
+func TestScaffolder_PostNew_FailureNonAtomic(t *testing.T) {
+	// Req 10, Scenario 2: a failing post-new hook leaves generated files on
+	// disk (non-atomic by design) and returns an error.
+	tmpDir, err := os.MkdirTemp("", "hooks-postfail-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	fr := &hooks.FakeRunner{
+		Responses: []hooks.FakeResponse{
+			{ExitCode: 0}, // pre-new succeeds
+			{ExitCode: 1}, // post-new fails (exit 1)
+		},
+	}
+	runner := hooks.NewRunner(&hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{
+			hooks.PreNew:  {{Command: "echo", Args: []string{"pre"}}},
+			hooks.PostNew: {{Command: "false"}},
+		},
+	}, fr, &bytes.Buffer{})
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "NonAtomicApp",
+		ModuleName:   "github.com/test/nonatomic",
+		Architecture: "Minimalist",
+	}
+	scaffolder := NewScaffolder(config, WithRunner(runner), WithVersion("1.0.0"))
+
+	err = scaffolder.Execute()
+	if err == nil {
+		t.Fatal("expected error from post-new failure, got nil")
+	}
+
+	// Project files must remain on disk (non-atomic by design).
+	projDir := filepath.Join(tmpDir, "NonAtomicApp")
+	for _, f := range []string{"main.go", "go.mod", ".go-arch.yaml"} {
+		p := filepath.Join(projDir, f)
+		if _, statErr := os.Stat(p); os.IsNotExist(statErr) {
+			t.Errorf("expected file %s to remain on disk after post-new failure", p)
+		}
+	}
+	// Verify pre-new and post-new both fired (pre-new succeeded, post-new failed).
+	if len(fr.Calls) != 2 {
+		t.Errorf("expected 2 calls (pre-new + post-new), got %d", len(fr.Calls))
+	}
+}
+
 func TestScaffolder_NilRunner_IsNoop(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "hooks-nil-*")
 	if err != nil {
