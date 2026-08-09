@@ -13,14 +13,56 @@ import (
 )
 
 type Scaffolder struct {
-	engine *template.Engine
-	config *ui.ProjectConfig
+	engine   *template.Engine
+	config   *ui.ProjectConfig
+	manifest *Manifest // lazy-loaded via ensureManifest
 }
 
 func NewScaffolder(config *ui.ProjectConfig) *Scaffolder {
 	return &Scaffolder{
 		engine: template.NewEngine(),
 		config: config,
+	}
+}
+
+// ensureManifest opens the manifest once, cached for the Scaffolder's lifetime.
+func (s *Scaffolder) ensureManifest() (*Manifest, error) {
+	if s.manifest != nil {
+		return s.manifest, nil
+	}
+	m, err := LoadManifest(s.config.ProjectName)
+	if err != nil {
+		return nil, err
+	}
+	s.manifest = m
+	return m, nil
+}
+
+// recordManifest hashes the just-written file and upserts the entry.
+// Called AFTER successful write in createFile / createBinaryFile.
+// Manifest save failure is NON-FATAL: log to stderr and continue.
+// The scaffold write already succeeded; the manifest is a secondary index.
+func (s *Scaffolder) recordManifest(targetPath, templatePath string, origin Origin, metadata map[string]string) {
+	m, err := s.ensureManifest()
+	if err != nil {
+		recordManifestWarning("manifest load failed: %v", err)
+		return
+	}
+	fullPath := filepath.Join(s.config.ProjectName, targetPath)
+	hash, err := hashFile(fullPath)
+	if err != nil {
+		recordManifestWarning("manifest hash failed for %s: %v", targetPath, err)
+		return
+	}
+	m.Upsert(ManifestEntry{
+		Path:         targetPath,
+		SHA256:       hash,
+		Origin:       origin,
+		TemplatePath: templatePath,
+		Metadata:     metadata,
+	})
+	if err := m.Save(); err != nil {
+		recordManifestWarning("manifest save failed: %v", err)
 	}
 }
 
@@ -63,7 +105,12 @@ func (s *Scaffolder) createFile(path string, templatePath string, data interface
 		data = s.config
 	}
 
-	return s.engine.Render(f, templatePath, data)
+	if err := s.engine.Render(f, templatePath, data); err != nil {
+		return err
+	}
+
+	s.recordManifest(path, templatePath, OriginScaffold, nil)
+	return nil
 }
 
 // createBinaryFile copies a file from the embedded templates FS to the target
@@ -79,7 +126,11 @@ func (s *Scaffolder) createBinaryFile(targetPath, embeddedPath string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(full, data, 0644)
+	if err := os.WriteFile(full, data, 0644); err != nil {
+		return err
+	}
+	s.recordManifest(targetPath, embeddedPath, OriginBinary, nil)
+	return nil
 }
 
 // scaffoldWeb generates the templ + HTMX web scaffold: templ views, static
@@ -306,7 +357,15 @@ func (s *Scaffolder) GenerateComponent(compType, name string) error {
 		return fmt.Errorf("unsupported component type: %s", compType)
 	}
 
-	return s.createFile(targetPath, templatePath, data)
+	if err := s.createFile(targetPath, templatePath, data); err != nil {
+		return err
+	}
+
+	// Re-record with correct origin (upsert wins over the OriginScaffold
+	// that createFile wrote). Non-fatal if manifest operations fail.
+	meta := map[string]string{"entity_name": name}
+	s.recordManifest(targetPath, templatePath, OriginComponent, meta)
+	return nil
 }
 
 // GenerateCRUD generates the full structure for a CRUD entity
@@ -343,6 +402,10 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 		if err := s.createFile(path, tmpl, data); err != nil {
 			return err
 		}
+		// Re-record with OriginCrud (upsert wins over OriginScaffold from createFile).
+		// Non-fatal if manifest operations fail.
+		meta := map[string]string{"entity_name": name}
+		s.recordManifest(path, tmpl, OriginCrud, meta)
 	}
 
 	fmt.Println("\n✅ CRUD generated successfully.")
