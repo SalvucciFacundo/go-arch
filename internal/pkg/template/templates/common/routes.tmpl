@@ -1,15 +1,15 @@
 package router
 
-{{ if .Routes }}
 import (
 	"net/http"
+	{{ if .Routes }}
 	{{ if eq .Architecture "Hexagonal" }}
 	"{{ .ModuleName }}/internal/adapters"
 	{{ else }}
 	"{{ .ModuleName }}/internal/handler"
 	{{ end }}
+	{{ end }}
 )
-{{ end }}
 
 func Register(mux *http.ServeMux) {
 {{ range .Routes }}

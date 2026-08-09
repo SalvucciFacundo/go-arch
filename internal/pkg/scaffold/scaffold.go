@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"bytes"
 	"fmt"
 	"go-arch/internal/pkg/template"
 	"go-arch/internal/ui"
@@ -25,12 +26,22 @@ func NewScaffolder(config *ui.ProjectConfig) *Scaffolder {
 	}
 }
 
+// manifestDir returns the project root for manifest operations.
+// In generate context (manifest exists in CWD), returns ".".
+// In new context (no manifest yet), returns s.config.ProjectName.
+func (s *Scaffolder) manifestDir() string {
+	if ManifestExists(".") {
+		return "."
+	}
+	return s.config.ProjectName
+}
+
 // ensureManifest opens the manifest once, cached for the Scaffolder's lifetime.
 func (s *Scaffolder) ensureManifest() (*Manifest, error) {
 	if s.manifest != nil {
 		return s.manifest, nil
 	}
-	m, err := LoadManifest(s.config.ProjectName)
+	m, err := LoadManifest(s.manifestDir())
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +59,7 @@ func (s *Scaffolder) recordManifest(targetPath, templatePath string, origin Orig
 		recordManifestWarning("manifest load failed: %v", err)
 		return
 	}
-	fullPath := filepath.Join(s.config.ProjectName, targetPath)
+	fullPath := filepath.Join(s.manifestDir(), targetPath)
 	hash, err := hashFile(fullPath)
 	if err != nil {
 		recordManifestWarning("manifest hash failed for %s: %v", targetPath, err)
@@ -70,7 +81,7 @@ func (s *Scaffolder) Execute() error {
 	fmt.Printf("🏗️ Creating project '%s' with %s architecture...\n", s.config.ProjectName, s.config.Architecture)
 
 	// 1. Create base directory
-	if err := os.MkdirAll(s.config.ProjectName, 0755); err != nil {
+	if err := os.MkdirAll(s.manifestDir(), 0755); err != nil {
 		return err
 	}
 
@@ -88,7 +99,7 @@ func (s *Scaffolder) Execute() error {
 }
 
 func (s *Scaffolder) createFile(path string, templatePath string, data interface{}) error {
-	fullPath := filepath.Join(s.config.ProjectName, path)
+	fullPath := filepath.Join(s.manifestDir(), path)
 
 	// Crear directorios intermedios
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
@@ -118,7 +129,7 @@ func (s *Scaffolder) createFile(path string, templatePath string, data interface
 // binary assets and files containing template delimiters must not pass through
 // the text/template engine or the local/global override chain.
 func (s *Scaffolder) createBinaryFile(targetPath, embeddedPath string) error {
-	full := filepath.Join(s.config.ProjectName, targetPath)
+	full := filepath.Join(s.manifestDir(), targetPath)
 	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
 		return err
 	}
@@ -143,9 +154,10 @@ func (s *Scaffolder) scaffoldWeb() error {
 		"views/components",
 		"static/css",
 		"static/js",
+		"internal/router",
 	}
 	for _, d := range dirs {
-		if err := os.MkdirAll(filepath.Join(s.config.ProjectName, d), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(s.manifestDir(), d), 0755); err != nil {
 			return err
 		}
 	}
@@ -165,6 +177,16 @@ func (s *Scaffolder) scaffoldWeb() error {
 	}
 
 	if err := s.createBinaryFile("static/js/htmx.min.js", "web/htmx.min.js"); err != nil {
+		return err
+	}
+
+	// Create empty-list routes.go so project compiles immediately.
+	data := RoutesData{
+		ModuleName:   s.config.ModuleName,
+		Architecture: s.config.Architecture,
+		Routes:       []RouteEntry{},
+	}
+	if err := s.createFile("internal/router/routes.go", "common/routes.tmpl", data); err != nil {
 		return err
 	}
 
@@ -193,7 +215,7 @@ func (s *Scaffolder) scaffoldStandard() error {
 		"internal/repository",
 	}
 	for _, d := range dirs {
-		if err := os.MkdirAll(filepath.Join(s.config.ProjectName, d), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(s.manifestDir(), d), 0755); err != nil {
 			return err
 		}
 	}
@@ -214,7 +236,7 @@ func (s *Scaffolder) scaffoldHexagonal() error {
 		"internal/adapters",
 	}
 	for _, d := range dirs {
-		if err := os.MkdirAll(filepath.Join(s.config.ProjectName, d), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(s.manifestDir(), d), 0755); err != nil {
 			return err
 		}
 	}
@@ -282,8 +304,28 @@ func (s *Scaffolder) createCommonFiles() error {
 	return nil
 }
 
-// GenerateComponent generates a specific component (service, repository, handler)
-func (s *Scaffolder) GenerateComponent(compType, name string) error {
+// GenerateOption configures optional behavior for GenerateComponent.
+type GenerateOption func(*generateConfig)
+
+type generateConfig struct {
+	routePattern string
+}
+
+// WithRoute sets the route pattern for handler generation.
+func WithRoute(pattern string) GenerateOption {
+	return func(cfg *generateConfig) {
+		cfg.routePattern = pattern
+	}
+}
+
+// GenerateComponent generates a specific component (service, repository, handler).
+// Accepts variadic GenerateOption for optional route registration.
+func (s *Scaffolder) GenerateComponent(compType, name string, opts ...GenerateOption) error {
+	cfg := &generateConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	var targetPath string
 	var templatePath string
 
@@ -309,7 +351,7 @@ func (s *Scaffolder) GenerateComponent(compType, name string) error {
 		}
 		targetPath = filepath.Join("views/pages", strings.ToLower(name)+".templ")
 		templatePath = "web/page_generated.tmpl"
-		if _, err := os.Stat(filepath.Join(s.config.ProjectName, targetPath)); err == nil {
+		if _, err := os.Stat(filepath.Join(s.manifestDir(), targetPath)); err == nil {
 			return oops.Code("component_already_exists").
 				Hint("Choose a different name or delete the existing file").
 				Errorf("target file already exists: %s", targetPath)
@@ -327,7 +369,7 @@ func (s *Scaffolder) GenerateComponent(compType, name string) error {
 		}
 		targetPath = filepath.Join("views/components", strings.ToLower(name)+".templ")
 		templatePath = "web/component_generated.tmpl"
-		if _, err := os.Stat(filepath.Join(s.config.ProjectName, targetPath)); err == nil {
+		if _, err := os.Stat(filepath.Join(s.manifestDir(), targetPath)); err == nil {
 			return oops.Code("component_already_exists").
 				Hint("Choose a different name or delete the existing file").
 				Errorf("target file already exists: %s", targetPath)
@@ -347,6 +389,19 @@ func (s *Scaffolder) GenerateComponent(compType, name string) error {
 			targetPath = filepath.Join("internal/repository", name+"_repository.go")
 		}
 	case "handler":
+		// Validate route pattern if provided
+		if cfg.routePattern != "" {
+			if !s.config.UseTemplHTMX {
+				return oops.Code("web_scaffold_required").
+					Hint("Set `use_templ_htmx: true` in .go-arch.yaml or re-run `go-arch new` with the flag").
+					Errorf("--route requires the web scaffold")
+			}
+			if !isValidRoutePattern(cfg.routePattern) {
+				return oops.Code("invalid_route_pattern").
+					Hint("Pattern must be 'METHOD /path' (e.g. 'GET /stats')").
+					Errorf("invalid route pattern: %s", cfg.routePattern)
+			}
+		}
 		templatePath = "common/handler.tmpl"
 		if s.config.Architecture == "Hexagonal" {
 			targetPath = filepath.Join("internal/adapters", name+"_handler.go")
@@ -365,6 +420,22 @@ func (s *Scaffolder) GenerateComponent(compType, name string) error {
 	// that createFile wrote). Non-fatal if manifest operations fail.
 	meta := map[string]string{"entity_name": name}
 	s.recordManifest(targetPath, templatePath, OriginComponent, meta)
+
+	// Upsert route if provided and web project
+	if cfg.routePattern != "" && s.config.UseTemplHTMX {
+		m, err := s.ensureManifest()
+		if err == nil {
+			_ = m.UpsertRoute(RouteEntry{
+				Entity:       name,
+				Handler:      name,
+				Origin:       "handler",
+				RoutePattern: cfg.routePattern,
+			})
+			// Re-render routes.go from manifest
+			_ = s.renderRoutesRegistry()
+		}
+	}
+
 	return nil
 }
 
@@ -409,7 +480,22 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 	}
 
 	fmt.Println("\n✅ CRUD generated successfully.")
-	fmt.Println("📍 Remember to register the routes in your main router.")
+
+	if s.config.UseTemplHTMX {
+		// Upsert route in manifest and re-render routes.go
+		m, err := s.ensureManifest()
+		if err == nil {
+			_ = m.UpsertRoute(RouteEntry{
+				Entity:  name,
+				Handler: name,
+				Origin:  "crud",
+			})
+			_ = s.renderRoutesRegistry()
+			fmt.Println("🔗 Routes registered in internal/router/routes.go")
+		}
+	} else {
+		fmt.Println("📍 Remember to register the routes in your main router.")
+	}
 	return nil
 }
 
@@ -418,4 +504,74 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 // strings with hyphens, and strings with leading digits.
 func isValidGoIdentifier(name string) bool {
 	return token.IsIdentifier(name)
+}
+
+// RoutesData is the template data for routes.tmpl.
+type RoutesData struct {
+	ModuleName   string
+	Architecture string
+	Routes       []RouteEntry
+}
+
+// renderRoutesRegistry re-renders internal/router/routes.go from manifest.Routes.
+// Uses RenderTo with quiet=true to suppress custom-template notices.
+// Uses compare-then-write to avoid unnecessary disk writes and manifest churn.
+func (s *Scaffolder) renderRoutesRegistry() error {
+	m, err := s.ensureManifest()
+	if err != nil {
+		return err
+	}
+	data := RoutesData{
+		ModuleName:   s.config.ModuleName,
+		Architecture: s.config.Architecture,
+		Routes:       m.Routes,
+	}
+
+	var buf bytes.Buffer
+	templatePath := "common/routes.tmpl"
+	if err := s.engine.RenderTo(&buf, templatePath, data, true); err != nil {
+		return err
+	}
+
+	targetPath := "internal/router/routes.go"
+	fullPath := filepath.Join(s.manifestDir(), targetPath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return err
+	}
+
+	// Compare-then-write: skip write if content is byte-identical
+	existing, readErr := os.ReadFile(fullPath)
+	if readErr == nil && bytes.Equal(existing, buf.Bytes()) {
+		return nil
+	}
+
+	if err := os.WriteFile(fullPath, buf.Bytes(), 0644); err != nil {
+		return err
+	}
+
+	s.recordManifest(targetPath, templatePath, OriginComponent, nil)
+	return nil
+}
+
+// isValidRoutePattern validates "METHOD /path" format.
+// Method must be one of GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS.
+// Path must start with "/".
+func isValidRoutePattern(pattern string) bool {
+	parts := strings.Fields(pattern)
+	if len(parts) != 2 {
+		return false
+	}
+	method := parts[0]
+	path := parts[1]
+	validMethods := map[string]bool{
+		"GET": true, "POST": true, "PUT": true, "DELETE": true, "PATCH": true,
+		"HEAD": true, "OPTIONS": true,
+	}
+	if !validMethods[method] {
+		return false
+	}
+	if !strings.HasPrefix(path, "/") {
+		return false
+	}
+	return true
 }
