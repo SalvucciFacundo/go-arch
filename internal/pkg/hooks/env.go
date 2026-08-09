@@ -36,6 +36,12 @@ func BuildEnv(parent []string, ctx EnvContext, perEntry map[string]string) []str
 		"ARCHITECTURE": ctx.Arch,
 		"HOOK_TYPE":    string(ctx.HookType),
 	}
+	if ctx.PackName != "" {
+		standardEnvs["PACK_NAME"] = ctx.PackName
+	}
+	if ctx.PackVersion != "" {
+		standardEnvs["PACK_VERSION"] = ctx.PackVersion
+	}
 	for k, v := range standardEnvs {
 		result[k] = fmt.Sprintf("%s=%s", k, v)
 	}
