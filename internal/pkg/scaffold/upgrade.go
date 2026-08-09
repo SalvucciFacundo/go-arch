@@ -98,6 +98,18 @@ func Upgrade(cfg *ui.ProjectConfig) (*UpgradePlan, error) {
 		diskBytes, err := os.ReadFile(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
+				// routes.go absent: always re-render from manifest.Routes
+				if path == "internal/router/routes.go" {
+					rerender, rerenderErr := renderEntry(engine, entry, cfg, m)
+					if rerenderErr != nil {
+						continue
+					}
+					action.RerenderHash = hashBytes(rerender)
+					action.RerenderBytes = rerender
+					action.Classification = ClassUpgradable
+					plan.Files = append(plan.Files, action)
+					continue
+				}
 				action.Classification = ClassAbsent
 				plan.Files = append(plan.Files, action)
 				continue
@@ -109,7 +121,7 @@ func Upgrade(cfg *ui.ProjectConfig) (*UpgradePlan, error) {
 
 		// go.mod is always report-only
 		if path == "go.mod" {
-			rerender, rerenderErr := renderEntry(engine, entry, cfg)
+			rerender, rerenderErr := renderEntry(engine, entry, cfg, m)
 			if rerenderErr == nil {
 				rerenderHash := hashBytes(rerender)
 				action.RerenderHash = rerenderHash
@@ -128,6 +140,24 @@ func Upgrade(cfg *ui.ProjectConfig) (*UpgradePlan, error) {
 			continue
 		}
 
+		// routes.go: always re-render from manifest.Routes (never PROTECTED)
+		if path == "internal/router/routes.go" {
+			rerender, err := renderEntry(engine, entry, cfg, m)
+			if err != nil {
+				continue
+			}
+			rerenderHash := hashBytes(rerender)
+			action.RerenderHash = rerenderHash
+			action.RerenderBytes = rerender
+			if diskHash != rerenderHash {
+				action.Classification = ClassUpgradable
+			} else {
+				continue
+			}
+			plan.Files = append(plan.Files, action)
+			continue
+		}
+
 		// Disk vs manifest: user-modified?
 		if diskHash != entry.SHA256 {
 			action.Classification = ClassProtected
@@ -136,7 +166,7 @@ func Upgrade(cfg *ui.ProjectConfig) (*UpgradePlan, error) {
 		}
 
 		// Disk matches manifest — re-render to check for template changes
-		rerender, err := renderEntry(engine, entry, cfg)
+		rerender, err := renderEntry(engine, entry, cfg, m)
 		if err != nil {
 			// Template missing or render error: OMIT from plan (up_to_date, ADR-4)
 			continue
@@ -160,7 +190,43 @@ func Upgrade(cfg *ui.ProjectConfig) (*UpgradePlan, error) {
 		plan.Files = append(plan.Files, action)
 	}
 
+	// Post-loop: ensure routes.go exists for web projects. A pre-change
+	// project has no manifest entry for internal/router/routes.go, but the
+	// current web/main.tmpl references router.Register(mux) — without the
+	// file the upgraded project would not compile.
+	if cfg.UseTemplHTMX {
+		routesPath := "internal/router/routes.go"
+		if _, err := os.Stat(filepath.Join(root, routesPath)); os.IsNotExist(err) {
+			rerender, rerenderErr := renderRoutesRegistry(engine, cfg, m.Routes)
+			if rerenderErr == nil {
+				plan.Files = append(plan.Files, FileAction{
+					Path:           routesPath,
+					Classification: ClassUpgradable,
+					RerenderHash:   hashBytes(rerender),
+					RerenderBytes:  rerender,
+				})
+				plan.TemplHint = true
+			}
+		}
+	}
+
 	return plan, nil
+}
+
+// renderRoutesRegistry renders internal/router/routes.go from the manifest
+// route list. Shared by upgrade (which may create the file for pre-change
+// projects) and the legacy fallback.
+func renderRoutesRegistry(engine *template.Engine, cfg *ui.ProjectConfig, routes []RouteEntry) ([]byte, error) {
+	data := RoutesData{
+		ModuleName:   cfg.ModuleName,
+		Architecture: cfg.Architecture,
+		Routes:       routes,
+	}
+	var buf bytes.Buffer
+	if err := engine.RenderTo(&buf, "common/routes.tmpl", data, true); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // ──────────────────────────────────────────────────────────
@@ -168,13 +234,13 @@ func Upgrade(cfg *ui.ProjectConfig) (*UpgradePlan, error) {
 // ──────────────────────────────────────────────────────────
 
 // renderEntry re-renders a manifest entry through the engine chain.
-func renderEntry(engine *template.Engine, entry ManifestEntry, cfg *ui.ProjectConfig) ([]byte, error) {
+func renderEntry(engine *template.Engine, entry ManifestEntry, cfg *ui.ProjectConfig, m *Manifest) ([]byte, error) {
 	if entry.Origin == OriginBinary {
 		data, err := template.TemplatesFS.ReadFile("templates/" + entry.TemplatePath)
 		return data, err
 	}
 
-	data := buildRenderData(cfg, entry)
+	data := buildRenderData(cfg, entry, m)
 	var buf bytes.Buffer
 	if err := engine.RenderTo(&buf, entry.TemplatePath, data, true); err != nil {
 		return nil, err
@@ -183,7 +249,15 @@ func renderEntry(engine *template.Engine, entry ManifestEntry, cfg *ui.ProjectCo
 }
 
 // buildRenderData reconstructs the template data from config + manifest metadata.
-func buildRenderData(cfg *ui.ProjectConfig, entry ManifestEntry) interface{} {
+func buildRenderData(cfg *ui.ProjectConfig, entry ManifestEntry, m *Manifest) interface{} {
+	// Special case: routes.go needs the route list from the manifest.
+	if entry.Path == "internal/router/routes.go" {
+		return RoutesData{
+			ModuleName:   cfg.ModuleName,
+			Architecture: cfg.Architecture,
+			Routes:       m.Routes,
+		}
+	}
 	if entityName, ok := entry.Metadata["entity_name"]; ok {
 		return struct {
 			ui.ProjectConfig
@@ -244,6 +318,13 @@ func (p *UpgradePlan) Apply() (int, error) {
 		newHash := hashBytes(f.RerenderBytes)
 		entry := m.Files[f.Path]
 		entry.SHA256 = newHash
+		// Newly created files (e.g. routes.go from a pre-change project) have
+		// no manifest entry yet — seed the template + origin so the next
+		// upgrade re-renders them correctly.
+		if entry.TemplatePath == "" {
+			entry.TemplatePath = "common/routes.tmpl"
+			entry.Origin = OriginScaffold
+		}
 		m.Files[f.Path] = entry
 		applied++
 	}
@@ -406,6 +487,25 @@ func upgradeLegacy(cfg *ui.ProjectConfig, root string) (*UpgradePlan, error) {
 					Classification: ClassUpgradable, // report-only in apply
 					RerenderBytes:  buf.Bytes(),
 				})
+			}
+		}
+	}
+
+	// Web projects without a manifest still need routes.go once the current
+	// web/main.tmpl references router.Register(mux) — otherwise the upgraded
+	// project would not compile. Create it with an empty route list.
+	if cfg.UseTemplHTMX {
+		routesPath := "internal/router/routes.go"
+		if _, err := os.Stat(filepath.Join(root, routesPath)); os.IsNotExist(err) {
+			rerender, rerenderErr := renderRoutesRegistry(engine, cfg, nil)
+			if rerenderErr == nil {
+				plan.Files = append(plan.Files, FileAction{
+					Path:           routesPath,
+					Classification: ClassUpgradable,
+					RerenderHash:   hashBytes(rerender),
+					RerenderBytes:  rerender,
+				})
+				plan.TemplHint = true
 			}
 		}
 	}

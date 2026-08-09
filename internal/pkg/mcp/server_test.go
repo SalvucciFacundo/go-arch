@@ -402,3 +402,96 @@ architecture: Minimalist
 		t.Errorf("expected go_arch_version in .go-arch.yaml, got: %s", string(configAfter))
 	}
 }
+
+// ──────────────────────────────────────────────────────────
+// Phase 3: MCP route property tests (3.5)
+// ──────────────────────────────────────────────────────────
+
+// TestGenerateComponentRouteMCP verifies task 3.4: generate_component via MCP
+// accepts a "route" property and passes it to GenerateComponent.
+func TestGenerateComponentRouteMCP(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "mcp-route-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	configYAML := `project_name: "."
+module_name: github.com/test/mcproute
+architecture: Standard
+use_templ_htmx: true
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// generate_component with route property
+	args, _ := json.Marshal(map[string]string{
+		"type":  "handler",
+		"name":  "Stats",
+		"route": "GET /stats",
+	})
+	var rawArgs json.RawMessage = args
+
+	// Call handler — don't capture stdout, just verify filesystem
+	handleToolCall(1, "generate_component", rawArgs)
+
+	// Verify routes.go was created/updated with the Stats handler
+	routesPath := filepath.Join(tmpDir, "internal", "router", "routes.go")
+	routesContent, err := os.ReadFile(routesPath)
+	if err != nil {
+		t.Fatalf("expected routes.go to exist: %v", err)
+	}
+	if !strings.Contains(string(routesContent), "GET /stats") {
+		t.Errorf("routes.go should contain 'GET /stats', got:\n%s", string(routesContent))
+	}
+	if !strings.Contains(string(routesContent), "StatsHandler") {
+		t.Errorf("routes.go should contain 'StatsHandler', got:\n%s", string(routesContent))
+	}
+}
+
+// TestGenerateComponentCRUDMCPRegistry verifies that MCP generate_component
+// type=crud updates the route registry.
+func TestGenerateComponentCRUDMCPRegistry(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "mcp-crud-reg-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	configYAML := `project_name: "."
+module_name: github.com/test/mcpcrudreg
+architecture: Standard
+use_templ_htmx: true
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	args, _ := json.Marshal(map[string]string{
+		"type": "crud",
+		"name": "User",
+	})
+	var rawArgs json.RawMessage = args
+
+	// Call handler — don't capture stdout, just verify filesystem
+	handleToolCall(1, "generate_component", rawArgs)
+
+	// Verify routes.go is updated with NewUserHandler().Register(mux)
+	routesPath := filepath.Join(tmpDir, "internal", "router", "routes.go")
+	routesContent, err := os.ReadFile(routesPath)
+	if err != nil {
+		t.Fatalf("expected routes.go to exist: %v", err)
+	}
+	if !strings.Contains(string(routesContent), "NewUserHandler().Register(mux)") {
+		t.Errorf("routes.go should contain NewUserHandler().Register(mux), got:\n%s", string(routesContent))
+	}
+}

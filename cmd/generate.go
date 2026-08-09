@@ -11,6 +11,7 @@ import (
 )
 
 func init() {
+	generateCmd.Flags().String("route", "", `Route pattern for handler type (e.g. "GET /stats"). CRUD auto-registers in web projects.`)
 	RootCmd.AddCommand(generateCmd)
 }
 
@@ -22,7 +23,12 @@ var generateCmd = &cobra.Command{
 Backend types: service, repository, handler, crud.
 Web types (require use_templ_htmx: true in .go-arch.yaml):
   page      → views/pages/<lowercase_name>.templ
-  component → views/components/<lowercase_name>.templ (a templ component)`,
+  component → views/components/<lowercase_name>.templ (a templ component)
+
+Flags:
+  --route "METHOD /path"   Register a route for the handler type in web projects
+                           (e.g. --route "GET /stats"). CRUD auto-registers routes
+                           in web projects by default.`,
 	Args:    cobra.ExactArgs(2),
 	Aliases: []string{"g"},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -50,12 +56,18 @@ Web types (require use_templ_htmx: true in .go-arch.yaml):
 
 		ui.Info(fmt.Sprintf("Generating %s component: %s...", compType, name))
 
+		routeFlag, _ := cmd.Flags().GetString("route")
+
 		scaffolder := scaffold.NewScaffolder(config)
 		var err error
 		if compType == "crud" {
 			err = scaffolder.GenerateCRUD(name)
 		} else {
-			err = scaffolder.GenerateComponent(compType, name)
+			var opts []scaffold.GenerateOption
+			if routeFlag != "" {
+				opts = append(opts, scaffold.WithRoute(routeFlag))
+			}
+			err = scaffolder.GenerateComponent(compType, name, opts...)
 		}
 
 		if err != nil {

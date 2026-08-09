@@ -829,6 +829,171 @@ func TestWriteVersionField_EmptyFile(t *testing.T) {
 	}
 }
 
+// ──────────────────────────────────────────────────────────
+// Phase 3: Routes upgrade tests (3.5)
+// ──────────────────────────────────────────────────────────
+
+// TestUpgrade_CreatesRoutesGo verifies that upgrade creates an absent
+// routes.go file in a web project and main.go gets the Register call.
+// File on disk routes.go = missing → classified absent + rendered on apply.
+// TestUpgrade_CreatesRoutesGo verifies that upgrade re-renders routes.go
+// when it is present in the manifest (in-manifest case).
+func TestUpgrade_CreatesRoutesGo(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/routes-upgrade",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+
+	// Create main.go on disk (matching embedded web/main.tmpl)
+	engine := template.NewEngine()
+	var mainBuf bytes.Buffer
+	if err := engine.RenderTo(&mainBuf, "web/main.tmpl", cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	mainBytes := mainBuf.Bytes()
+	mainHash := hashBytesForTest(mainBytes)
+	if err := os.WriteFile("main.go", mainBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create manifest with main.go but NO routes.go entry
+	m := &Manifest{
+		Version: 1,
+		Files: map[string]ManifestEntry{
+			"main.go": {
+				Path:         "main.go",
+				SHA256:       mainHash,
+				Origin:       OriginScaffold,
+				TemplatePath: "web/main.tmpl",
+			},
+			"internal/router/routes.go": {
+				Path:         "internal/router/routes.go",
+				SHA256:       "dummy",
+				Origin:       OriginScaffold,
+				TemplatePath: "common/routes.tmpl",
+			},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := Upgrade(cfg)
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	// routes.go should be re-rendered from manifest (classified upgradable, not absent)
+	foundRoutes := false
+	for _, f := range plan.Files {
+		if f.Path == "internal/router/routes.go" {
+			foundRoutes = true
+			// routes.go absent → re-rendered, classified as upgradable
+			if f.Classification != ClassUpgradable {
+				t.Errorf("absent routes.go classification = %q, want upgradable (re-rendered from manifest)", f.Classification)
+			}
+		}
+	}
+	if !foundRoutes {
+		t.Error("expected routes.go in the plan")
+	}
+
+	// main.go should be absent too (no main.go entry visible — but we created it)
+	// Actually main.go should show as up-to-date since hash matches and template unchanged
+	// Let's verify main.go is NOT in plan (up to date)
+	for _, f := range plan.Files {
+		if f.Path == "main.go" {
+			t.Errorf("main.go should be up-to-date (hash matches template), got classification=%s", f.Classification)
+		}
+	}
+}
+
+// TestUpgrade_RoutesGoNotProtected verifies that routes.go is NEVER classified
+// as PROTECTED even when its disk hash differs from the manifest hash.
+func TestUpgrade_RoutesGoNotProtected(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/routes-prot",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+
+	// Create routes.go on disk with content that DIFFERS from manifest hash
+	routesContent := []byte("package router\n\nfunc Register(mux *http.ServeMux) {}\n")
+	if err := os.MkdirAll("internal/router", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("internal/router/routes.go", routesContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Manifest routes.go has a DIFFERENT hash (simulates user edit)
+	// BUT it should still NOT be classified as PROTECTED — routes.go
+	// is always re-rendered from manifest.Routes.
+	m := &Manifest{
+		Version: 1,
+		Files: map[string]ManifestEntry{
+			"internal/router/routes.go": {
+				Path:         "internal/router/routes.go",
+				SHA256:       "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", // different from disk
+				Origin:       OriginScaffold,
+				TemplatePath: "common/routes.tmpl",
+			},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := Upgrade(cfg)
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	// routes.go must NOT be classified as PROTECTED
+	for _, f := range plan.Files {
+		if f.Path == "internal/router/routes.go" {
+			if f.Classification == ClassProtected {
+				t.Errorf("routes.go was classified PROTECTED — should never be protected")
+			}
+			// Should be upgradable (disk!=manifest but always re-rendered)
+			if f.Classification != ClassUpgradable {
+				t.Logf("routes.go classification: %s (expected upgradable)", f.Classification)
+			}
+		}
+	}
+
+	// There should be NO protected files from our test
+	if plan.CountBy(ClassProtected) > 0 {
+		// Only routes.go is in the manifest — all other protected counts are
+		// from the temp dir. Check specifically that routes.go is not the
+		// protected one.
+		for _, f := range plan.Files {
+			if f.Path == "internal/router/routes.go" && f.Classification == ClassProtected {
+				t.Error("routes.go incorrectly classified as PROTECTED")
+			}
+		}
+	}
+}
+
 // TestLegacyUpgrade_StandardArchitecture_NoTemplHTMX verifies that for
 // Standard architecture without UseTemplHTMX, the legacy whitelist correctly
 // maps cmd/api/main.go to standard/main.tmpl (not web/main.tmpl).
@@ -887,5 +1052,169 @@ func TestLegacyUpgrade_StandardArchitecture_NoTemplHTMX(t *testing.T) {
 	}
 	if !found {
 		t.Error("cmd/api/main.go not found in legacy plan for Standard architecture")
+	}
+}
+
+// TestUpgrade_CreatesRoutesGoPreChange verifies the CRITICAL fix: for a
+// genuinely pre-change web project (manifest WITHOUT a routes.go entry and no
+// routes.go on disk), upgrade proposes creating routes.go so the upgraded
+// main.go (which references router.Register) compiles. Also verifies Apply
+// writes it and seeds the manifest entry.
+func TestUpgrade_CreatesRoutesGoPreChange(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/pre-change",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+
+	// Pre-change project: main.go from the OLD web template (no Register call),
+	// manifest with main.go but NO routes.go entry, no routes.go on disk.
+	engine := template.NewEngine()
+	var mainBuf bytes.Buffer
+	if err := engine.RenderTo(&mainBuf, "web/main.tmpl", cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	mainBytes := mainBuf.Bytes()
+	mainHash := hashBytes(mainBytes)
+	if err := os.WriteFile("main.go", mainBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &Manifest{
+		Version: 1,
+		Files: map[string]ManifestEntry{
+			"main.go": {
+				Path:         "main.go",
+				SHA256:       mainHash,
+				Origin:       OriginScaffold,
+				TemplatePath: "web/main.tmpl",
+			},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// routes.go must NOT exist on disk.
+	if _, err := os.Stat("internal/router/routes.go"); !os.IsNotExist(err) {
+		t.Fatal("precondition: routes.go should not exist")
+	}
+
+	plan, err := Upgrade(cfg)
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	// The plan must propose creating routes.go.
+	foundRoutes := false
+	for _, f := range plan.Files {
+		if f.Path == "internal/router/routes.go" {
+			foundRoutes = true
+			if f.Classification != ClassUpgradable {
+				t.Errorf("pre-change routes.go classification = %q, want upgradable (create it)", f.Classification)
+			}
+			if len(f.RerenderBytes) == 0 {
+				t.Error("routes.go rerender bytes must be non-empty")
+			}
+		}
+	}
+	if !foundRoutes {
+		t.Fatal("expected routes.go in the plan for a pre-change web project")
+	}
+
+	// Apply must write routes.go and seed the manifest entry.
+	applied, err := plan.Apply()
+	if err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+	if applied < 1 {
+		t.Errorf("expected at least 1 file applied, got %d", applied)
+	}
+
+	if _, err := os.Stat("internal/router/routes.go"); err != nil {
+		t.Fatalf("routes.go should exist after apply: %v", err)
+	}
+
+	// Manifest must now have a routes.go entry with the correct template.
+	m2, err := LoadManifest(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := m2.Files["internal/router/routes.go"]
+	if !ok {
+		t.Fatal("manifest should now contain routes.go entry")
+	}
+	if entry.TemplatePath != "common/routes.tmpl" {
+		t.Errorf("routes.go manifest TemplatePath = %q, want common/routes.tmpl", entry.TemplatePath)
+	}
+
+	// Second upgrade must be idempotent (routes.go now up-to-date, not re-proposed as creation).
+	plan2, err := Upgrade(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range plan2.Files {
+		if f.Path == "internal/router/routes.go" {
+			t.Errorf("routes.go should be up-to-date on second upgrade, got classification=%s", f.Classification)
+		}
+	}
+}
+
+// TestLegacyUpgrade_CreatesRoutesGoWeb verifies the legacy fallback proposes
+// creating routes.go for a web project without a manifest (so the upgraded
+// main.go referencing router.Register compiles).
+func TestLegacyUpgrade_CreatesRoutesGoWeb(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/legacy-web",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+
+	// No manifest at all; a web project with old main.go on disk.
+	engine := template.NewEngine()
+	var mainBuf bytes.Buffer
+	if err := engine.RenderTo(&mainBuf, "web/main.tmpl", cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("main.go", mainBuf.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := Upgrade(cfg) // no manifest → upgradeLegacy
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+	if !plan.IsLegacy {
+		t.Fatal("expected legacy plan")
+	}
+
+	foundRoutes := false
+	for _, f := range plan.Files {
+		if f.Path == "internal/router/routes.go" {
+			foundRoutes = true
+			if f.Classification != ClassUpgradable {
+				t.Errorf("legacy routes.go classification = %q, want upgradable", f.Classification)
+			}
+		}
+	}
+	if !foundRoutes {
+		t.Error("expected routes.go creation proposed in legacy web upgrade")
 	}
 }

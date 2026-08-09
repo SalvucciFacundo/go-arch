@@ -275,3 +275,159 @@ func TestOriginConsts(t *testing.T) {
 		t.Errorf("OriginBinary = %q, want binary", OriginBinary)
 	}
 }
+
+func TestUpsertRoute_Dedupe(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manifest{
+		Version: 1,
+		Files:   make(map[string]ManifestEntry),
+		dir:     dir,
+	}
+
+	// Insert first route
+	if err := m.UpsertRoute(RouteEntry{
+		Entity:  "User",
+		Handler: "User",
+		Origin:  "crud",
+	}); err != nil {
+		t.Fatalf("first UpsertRoute failed: %v", err)
+	}
+	if len(m.Routes) != 1 {
+		t.Fatalf("after first insert: len(Routes) = %d, want 1", len(m.Routes))
+	}
+	if m.Routes[0].Entity != "User" {
+		t.Errorf("Entity = %q, want User", m.Routes[0].Entity)
+	}
+	if m.Routes[0].Origin != "crud" {
+		t.Errorf("Origin = %q, want crud", m.Routes[0].Origin)
+	}
+
+	// Upsert same entity — should replace, not append
+	if err := m.UpsertRoute(RouteEntry{
+		Entity:       "User",
+		Handler:      "User",
+		Origin:       "crud",
+		RoutePattern: "GET /users",
+	}); err != nil {
+		t.Fatalf("second UpsertRoute failed: %v", err)
+	}
+	if len(m.Routes) != 1 {
+		t.Fatalf("after dedupe: len(Routes) = %d, want 1", len(m.Routes))
+	}
+	if m.Routes[0].RoutePattern != "GET /users" {
+		t.Errorf("after dedupe RoutePattern = %q, want GET /users", m.Routes[0].RoutePattern)
+	}
+
+	// Insert different entity — should append
+	if err := m.UpsertRoute(RouteEntry{
+		Entity:  "Order",
+		Handler: "Order",
+		Origin:  "handler",
+	}); err != nil {
+		t.Fatalf("third UpsertRoute failed: %v", err)
+	}
+	if len(m.Routes) != 2 {
+		t.Fatalf("after third insert: len(Routes) = %d, want 2", len(m.Routes))
+	}
+	if m.Routes[1].Entity != "Order" {
+		t.Errorf("second route Entity = %q, want Order", m.Routes[1].Entity)
+	}
+}
+
+func TestManifest_Routes_YAML_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manifest{
+		Version: 1,
+		Files:   make(map[string]ManifestEntry),
+		Routes: []RouteEntry{
+			{Entity: "User", Handler: "User", Origin: "crud"},
+			{Entity: "Order", Handler: "Order", Origin: "handler", RoutePattern: "GET /orders"},
+		},
+		dir: dir,
+	}
+
+	if err := m.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	loaded, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatalf("LoadManifest after Save failed: %v", err)
+	}
+	if len(loaded.Routes) != 2 {
+		t.Fatalf("round-trip: len(Routes) = %d, want 2", len(loaded.Routes))
+	}
+	if loaded.Routes[0].Entity != "User" {
+		t.Errorf("round-trip route 0 Entity = %q, want User", loaded.Routes[0].Entity)
+	}
+	if loaded.Routes[0].Origin != "crud" {
+		t.Errorf("round-trip route 0 Origin = %q, want crud", loaded.Routes[0].Origin)
+	}
+	if loaded.Routes[1].Entity != "Order" {
+		t.Errorf("round-trip route 1 Entity = %q, want Order", loaded.Routes[1].Entity)
+	}
+	if loaded.Routes[1].RoutePattern != "GET /orders" {
+		t.Errorf("round-trip route 1 RoutePattern = %q, want GET /orders", loaded.Routes[1].RoutePattern)
+	}
+}
+
+func TestManifest_Routes_Omitempty(t *testing.T) {
+	dir := t.TempDir()
+	// Manifest with nil Routes — should not emit "routes:" key in YAML
+	m := &Manifest{
+		Version: 1,
+		Files:   make(map[string]ManifestEntry),
+		Routes:  nil,
+		dir:     dir,
+	}
+
+	if err := m.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	raw, err := os.ReadFile(ManifestPath(dir))
+	if err != nil {
+		t.Fatalf("read manifest failed: %v", err)
+	}
+
+	content := string(raw)
+	if contains(content, "routes:") {
+		t.Error("YAML output should NOT contain 'routes:' when Routes is nil (omitempty)")
+	}
+
+	// Load back — Routes should be empty/nil
+	loaded, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
+	}
+	if len(loaded.Routes) != 0 {
+		t.Errorf("loaded Routes should be empty, got %d entries", len(loaded.Routes))
+	}
+
+	// Now save with routes populated — "routes:" should appear
+	m2 := &Manifest{
+		Version: 1,
+		Files:   make(map[string]ManifestEntry),
+		Routes:  []RouteEntry{{Entity: "X", Handler: "X", Origin: "crud"}},
+		dir:     dir,
+	}
+	if err := m2.Save(); err != nil {
+		t.Fatalf("Save with routes failed: %v", err)
+	}
+	raw2, err := os.ReadFile(ManifestPath(dir))
+	if err != nil {
+		t.Fatalf("read manifest failed: %v", err)
+	}
+	if !contains(string(raw2), "routes:") {
+		t.Error("YAML output SHOULD contain 'routes:' when Routes is non-empty")
+	}
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

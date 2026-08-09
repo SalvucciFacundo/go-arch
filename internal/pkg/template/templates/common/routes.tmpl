@@ -1,0 +1,22 @@
+package router
+
+import (
+	"net/http"
+	{{ if .Routes }}
+	{{ if eq .Architecture "Hexagonal" }}
+	"{{ .ModuleName }}/internal/adapters"
+	{{ else }}
+	"{{ .ModuleName }}/internal/handler"
+	{{ end }}
+	{{ end }}
+)
+
+func Register(mux *http.ServeMux) {
+{{ range .Routes }}
+{{ if eq .Origin "crud" }}
+	{{ if eq $.Architecture "Hexagonal" }}adapters{{ else }}handler{{ end }}.New{{ .Handler }}Handler().Register(mux)
+{{ else }}
+	mux.HandleFunc("{{ .RoutePattern }}", {{ if eq $.Architecture "Hexagonal" }}adapters{{ else }}handler{{ end }}.New{{ .Handler }}Handler().ServeHTTP)
+{{ end }}
+{{ end }}
+}

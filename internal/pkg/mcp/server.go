@@ -182,6 +182,10 @@ func handleRequest(req *Request) {
 								"type":        "string",
 								"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
 							},
+							"route": map[string]interface{}{
+								"type":        "string",
+								"description": "Route pattern for handler type (e.g. 'GET /stats'). Ignored for other types.",
+							},
 						},
 						"required": []string{"type", "name"},
 					},
@@ -316,6 +320,7 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			Type        string `json:"type"`
 			Name        string `json:"name"`
 			ProjectPath string `json:"projectPath"`
+			Route       string `json:"route"`
 		}
 		if err := json.Unmarshal(arguments, &args); err != nil {
 			sendError(id, -32602, "Invalid tool arguments", err.Error())
@@ -355,7 +360,11 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 		if args.Type == "crud" {
 			err = scaffolder.GenerateCRUD(args.Name)
 		} else {
-			err = scaffolder.GenerateComponent(args.Type, args.Name)
+			var opts []scaffold.GenerateOption
+			if args.Route != "" {
+				opts = append(opts, scaffold.WithRoute(args.Route))
+			}
+			err = scaffolder.GenerateComponent(args.Type, args.Name, opts...)
 		}
 
 		if err != nil {
