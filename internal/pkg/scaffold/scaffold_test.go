@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"bytes"
+	"go-arch/internal/pkg/hooks"
 	"go-arch/internal/pkg/template"
 	"go-arch/internal/ui"
 	"os"
@@ -2211,5 +2212,345 @@ func TestScaffolder_CRUD(t *testing.T) {
 		if _, err := os.Stat(f); os.IsNotExist(err) {
 			t.Errorf("expected crud file %s to exist", f)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 3.1 RED — hook fire order, CWD, version visibility, stop-on-first, output routing
+// ---------------------------------------------------------------------------
+
+func TestScaffolder_PreNew_BeforeMkdirAll(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hooks-prenew-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	fr := &hooks.FakeRunner{}
+	runner := hooks.NewRunner(&hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{
+			hooks.PreNew:  {{Command: "echo", Args: []string{"pre"}}},
+			hooks.PostNew: {{Command: "echo", Args: []string{"post"}}},
+		},
+	}, fr, &bytes.Buffer{})
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "DemoApp",
+		ModuleName:   "github.com/test/demo",
+		Architecture: "Minimalist",
+	}
+	scaffolder := NewScaffolder(config, WithRunner(runner), WithVersion("1.2.3"))
+
+	// Verify project dir does NOT exist yet — pre-new must fire BEFORE MkdirAll
+	projDir := filepath.Join(tmpDir, "DemoApp")
+	if _, err := os.Stat(projDir); err == nil {
+		t.Fatal("project dir already exists before Execute() — can't assert pre-new ordering")
+	}
+
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// Two calls: pre-new then post-new
+	if len(fr.Calls) < 2 {
+		t.Fatalf("expected at least 2 hook calls, got %d", len(fr.Calls))
+	}
+
+	// Call 0: pre-new (uses "echo pre")
+	if fr.Calls[0].Args[0] != "pre" {
+		t.Errorf("first call should be pre-new (args: pre), got %v", fr.Calls[0].Args)
+	}
+	// Call 1: post-new (uses "echo post")
+	if fr.Calls[1].Args[0] != "post" {
+		t.Errorf("second call should be post-new (args: post), got %v", fr.Calls[1].Args)
+	}
+}
+
+func TestScaffolder_PostNew_SeesVersion(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hooks-postnew-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	fr := &hooks.FakeRunner{}
+	var outBuf bytes.Buffer
+	runner := hooks.NewRunner(&hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{
+			hooks.PreNew:  {{Command: "echo", Args: []string{"pre"}}},
+			hooks.PostNew: {{Command: "echo", Args: []string{"post"}}},
+		},
+	}, fr, &outBuf)
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "VerApp",
+		ModuleName:   "github.com/test/ver",
+		Architecture: "Minimalist",
+	}
+	version := "3.0.0-beta"
+	scaffolder := NewScaffolder(config, WithRunner(runner), WithVersion(version))
+
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// post-new must fire AFTER WriteVersionField writes go_arch_version to .go-arch.yaml
+	configPath := filepath.Join(tmpDir, "VerApp", ".go-arch.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("cannot read .go-arch.yaml: %v", err)
+	}
+	if !strings.Contains(string(data), "go_arch_version: "+version) {
+		t.Errorf("expected go_arch_version: %s in .go-arch.yaml\nGot: %s", version, string(data))
+	}
+
+	// Verify hook output went to outBuf (FakeRunner records calls; real output
+	// would go to injected writer. Call existence is the test assertion here.)
+
+	// Verify 2 calls (pre-new then post-new)
+	if len(fr.Calls) != 2 {
+		t.Errorf("expected 2 calls, got %d", len(fr.Calls))
+	}
+}
+
+func TestScaffolder_PreNew_CWD_IsInvocationDir(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hooks-cwdpre-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	fr := &hooks.FakeRunner{}
+	runner := hooks.NewRunner(&hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{
+			hooks.PreNew:  {{Command: "pwd"}},
+			hooks.PostNew: {{Command: "pwd"}},
+		},
+	}, fr, &bytes.Buffer{})
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "CwdApp",
+		ModuleName:   "github.com/test/cwd",
+		Architecture: "Minimalist",
+	}
+	scaffolder := NewScaffolder(config, WithRunner(runner), WithVersion("1.0.0"))
+
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if len(fr.Calls) < 2 {
+		t.Fatalf("expected 2 calls, got %d", len(fr.Calls))
+	}
+
+	// pre-new CWD: invocation dir (tmpDir)
+	preDir := fr.Calls[0].Opts.Dir
+	if preDir != tmpDir {
+		t.Errorf("pre-new CWD: got %q, want %q (invocation dir)", preDir, tmpDir)
+	}
+
+	// post-new CWD: the new project directory (tmpDir/CwdApp)
+	projDir := filepath.Join(tmpDir, "CwdApp")
+	postDir := fr.Calls[1].Opts.Dir
+	if postDir != projDir {
+		t.Errorf("post-new CWD: got %q, want %q (project dir)", postDir, projDir)
+	}
+}
+
+func TestScaffolder_GenerateComponent_FiresHooks(t *testing.T) {
+	// Scaffold a project first so GenerateComponent has a manifest to work with
+	tmpDir, err := os.MkdirTemp("", "hooks-gencomp-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Scaffold a project in CWD (ProjectName=".")
+	cfg := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/gencomp",
+		Architecture: "Standard",
+	}
+	s := NewScaffolder(cfg)
+	if err := s.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// Now wire a runner for the generate phase
+	fr := &hooks.FakeRunner{}
+	runner := hooks.NewRunner(&hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{
+			hooks.PreGenerate:  {{Command: "echo", Args: []string{"pre-gen"}}},
+			hooks.PostGenerate: {{Command: "echo", Args: []string{"post-gen"}}},
+		},
+	}, fr, &bytes.Buffer{})
+
+	s2 := NewScaffolder(cfg, WithRunner(runner))
+	if err := s2.GenerateComponent("service", "Order"); err != nil {
+		t.Fatalf("GenerateComponent failed: %v", err)
+	}
+
+	if len(fr.Calls) < 2 {
+		t.Fatalf("expected 2 calls for generate, got %d", len(fr.Calls))
+	}
+	if fr.Calls[0].Args[0] != "pre-gen" {
+		t.Errorf("first call should be pre-generate, got %v", fr.Calls[0].Args)
+	}
+	if fr.Calls[1].Args[0] != "post-gen" {
+		t.Errorf("second call should be post-generate, got %v", fr.Calls[1].Args)
+	}
+
+	// post-generate CWD: project root (tmpDir)
+	if fr.Calls[1].Opts.Dir != tmpDir {
+		t.Errorf("post-generate CWD: got %q, want %q", fr.Calls[1].Opts.Dir, tmpDir)
+	}
+}
+
+func TestScaffolder_GenerateCRUD_PostGenerate_AfterRoutesRegistry(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hooks-gencrud-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Scaffold web project
+	cfg := &ui.ProjectConfig{
+		ProjectName:  ".",
+		ModuleName:   "github.com/test/gencrud",
+		Architecture: "Standard",
+		UseTemplHTMX: true,
+	}
+	s := NewScaffolder(cfg)
+	if err := s.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	fr := &hooks.FakeRunner{}
+	var outBuf bytes.Buffer
+	runner := hooks.NewRunner(&hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{
+			hooks.PreGenerate:  {{Command: "echo", Args: []string{"pre-gen"}}},
+			hooks.PostGenerate: {{Command: "echo", Args: []string{"post-gen"}}},
+		},
+	}, fr, &outBuf)
+
+	s2 := NewScaffolder(cfg, WithRunner(runner))
+	if err := s2.GenerateCRUD("Product"); err != nil {
+		t.Fatalf("GenerateCRUD failed: %v", err)
+	}
+
+	if len(fr.Calls) < 2 {
+		t.Fatalf("expected 2 calls, got %d", len(fr.Calls))
+	}
+	if fr.Calls[0].Args[0] != "pre-gen" {
+		t.Errorf("first call should be pre-generate, got %v", fr.Calls[0].Args)
+	}
+	if fr.Calls[1].Args[0] != "post-gen" {
+		t.Errorf("second call should be post-generate, got %v", fr.Calls[1].Args)
+	}
+
+	// Routes registry must already exist when post-generate fires
+	routesPath := filepath.Join(tmpDir, "internal", "router", "routes.go")
+	routesContent, err := os.ReadFile(routesPath)
+	if err != nil {
+		t.Fatalf("cannot read routes.go: %v", err)
+	}
+	if !strings.Contains(string(routesContent), "Product") {
+		t.Errorf("expected 'Product' in routes.go after CRUD generation (post-generate should see it)\nGot: %s", routesContent)
+	}
+}
+
+func TestScaffolder_StopOnFirst_FailsPreNew(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hooks-stopfail-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	fr := &hooks.FakeRunner{
+		Responses: []hooks.FakeResponse{
+			{ExitCode: 1, RunErr: nil}, // pre-new fails → stop
+		},
+	}
+	runner := hooks.NewRunner(&hooks.Config{
+		Hooks: map[hooks.Type][]hooks.Entry{
+			hooks.PreNew:  {{Command: "false"}},
+			hooks.PostNew: {{Command: "should-not-run"}},
+		},
+	}, fr, &bytes.Buffer{})
+
+	config := &ui.ProjectConfig{
+		ProjectName:  "FailApp",
+		ModuleName:   "github.com/test/fail",
+		Architecture: "Minimalist",
+	}
+	scaffolder := NewScaffolder(config, WithRunner(runner), WithVersion("1.0.0"))
+
+	err = scaffolder.Execute()
+	if err == nil {
+		t.Fatal("expected error from pre-new failure, got nil")
+	}
+
+	// Only pre-new should have fired; post-new never reached
+	if len(fr.Calls) != 1 {
+		t.Errorf("expected 1 call (only pre-new), got %d", len(fr.Calls))
+	}
+}
+
+func TestScaffolder_NilRunner_IsNoop(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hooks-nil-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// No WithRunner — runner is nil, no hooks should fire
+	config := &ui.ProjectConfig{
+		ProjectName:  "NoHookApp",
+		ModuleName:   "github.com/test/nohook",
+		Architecture: "Minimalist",
+	}
+	scaffolder := NewScaffolder(config, WithVersion("1.0.0"))
+
+	if err := scaffolder.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// .go-arch.yaml should still have go_arch_version (WriteVersionField moved in)
+	configPath := filepath.Join(tmpDir, "NoHookApp", ".go-arch.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("cannot read .go-arch.yaml: %v", err)
+	}
+	if !strings.Contains(string(data), "go_arch_version: 1.0.0") {
+		t.Error("expected go_arch_version in .go-arch.yaml even without hooks runner")
 	}
 }
