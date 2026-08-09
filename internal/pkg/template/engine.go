@@ -28,13 +28,23 @@ func NewEngine() *Engine {
 	}
 }
 
+// Render renders a template to wr, printing a notice to stdout when a custom
+// (local or global) template override is used. Delegates to RenderTo with
+// quiet=false to preserve existing behavior.
 func (e *Engine) Render(wr io.Writer, templatePath string, data interface{}) error {
+	return e.RenderTo(wr, templatePath, data, false)
+}
+
+// RenderTo is like Render but accepts a quiet flag to suppress the
+// "Using custom template" print to stdout. Use quiet=true during upgrade
+// or MCP calls to avoid corrupting JSON-RPC.
+func (e *Engine) RenderTo(wr io.Writer, templatePath string, data interface{}, quiet bool) error {
 	t, source, err := e.getTemplate(templatePath)
 	if err != nil {
 		return err
 	}
 
-	if source != "embedded" {
+	if !quiet && source != "embedded" {
 		fmt.Printf("🎨 Using custom template (%s): %s\n", source, templatePath)
 	}
 
