@@ -495,3 +495,170 @@ use_templ_htmx: true
 		t.Errorf("routes.go should contain NewUserHandler().Register(mux), got:\n%s", string(routesContent))
 	}
 }
+
+// ──────────────────────────────────────────────────────────
+// Phase 4: MCP template param (4.10)
+// ──────────────────────────────────────────────────────────
+
+// TestNewProjectTemplateParam verifies task 4.10: when new_project is called
+// with a template param and a fixture pack, the handler resolves the pack
+// and scaffolds a pack-driven project. Architecture is NOT required when
+// template is present (P3).
+func TestNewProjectTemplateParam(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "mcp-template-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create fixture pack
+	packDir := filepath.Join(tmpDir, "express@1.0.0")
+	if err := os.MkdirAll(packDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	manifestYAML := `contract_version: 1
+name: express
+version: 1.0.0
+layout:
+  - cmd/api
+`
+	if err := os.WriteFile(filepath.Join(packDir, "go-arch.yaml"), []byte(manifestYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create templates directory with at least one template
+	templatesDir := filepath.Join(packDir, "templates")
+	if err := os.MkdirAll(templatesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mainTmpl := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello from DemoApp")
+}
+`
+	if err := os.WriteFile(filepath.Join(templatesDir, "main.go.tmpl"), []byte(mainTmpl), 0644); err != nil {
+		t.Fatal(err)
+	}
+	configTmpl := `project_name: {{ .ProjectName }}
+module_name: {{ .ModuleName }}
+architecture: {{ .Architecture }}
+template: {{ .Template }}
+`
+	if err := os.WriteFile(filepath.Join(templatesDir, ".go-arch.yaml.tmpl"), []byte(configTmpl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Set up packs env so LatestInstalled finds the fixture
+	t.Setenv("GO_ARCH_PACKS_DIR", tmpDir)
+
+	// Redirect ui.Out to stderr to avoid JSON-RPC corruption
+	origOut := os.Stdout
+	os.Stderr, _ = os.Create(filepath.Join(tmpDir, "stderr.log"))
+	defer func() { os.Stdout = origOut }()
+
+	// Call new_project with template (no architecture)
+	args, _ := json.Marshal(map[string]interface{}{
+		"projectName": "DemoApp",
+		"moduleName":  "github.com/demo/app",
+		"template":    "express",
+	})
+	var rawArgs json.RawMessage = args
+
+	output := captureStdout(func() {
+		handleToolCall(1, "new_project", rawArgs)
+	})
+
+	// The scaffold writes messages to stdout before the JSON-RPC response.
+	// Extract the last line (JSON-RPC) from the captured output.
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	jsonLine := lines[len(lines)-1]
+
+	// Parse the JSON-RPC response
+	var resp Response
+	if err := json.Unmarshal([]byte(jsonLine), &resp); err != nil {
+		t.Fatalf("expected valid JSON response, got: %s — err: %v", jsonLine, err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("expected no error, got code=%d message=%q", resp.Error.Code, resp.Error.Message)
+	}
+
+	// Verify project was created
+	projectDir := filepath.Join(tmpDir, "DemoApp")
+	if _, err := os.Stat(projectDir); os.IsNotExist(err) {
+		t.Fatalf("expected project directory DemoApp/ to exist")
+	}
+
+	// Verify .go-arch.yaml contains template field
+	configFile := filepath.Join(projectDir, ".go-arch.yaml")
+	configContent, err := os.ReadFile(configFile)
+	if err != nil {
+		t.Fatalf("cannot read .go-arch.yaml: %v", err)
+	}
+	if !strings.Contains(string(configContent), "template: express") {
+		t.Errorf(".go-arch.yaml must contain 'template: express'; got:\n%s", string(configContent))
+	}
+
+	// Verify main.go was generated
+	mainFile := filepath.Join(projectDir, "main.go")
+	if _, err := os.Stat(mainFile); os.IsNotExist(err) {
+		t.Errorf("expected main.go to exist")
+	}
+}
+
+// TestNewProjectTemplateMissingPack verifies task 4.10: when template
+// references a non-installed pack, the handler errors cleanly.
+func TestNewProjectTemplateMissingPack(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "mcp-template-miss-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Empty packs dir — no packs installed
+	t.Setenv("GO_ARCH_PACKS_DIR", tmpDir)
+
+	args, _ := json.Marshal(map[string]interface{}{
+		"projectName": "DemoApp",
+		"moduleName":  "github.com/demo/app",
+		"template":    "express",
+	})
+	var rawArgs json.RawMessage = args
+
+	output := captureStdout(func() {
+		handleToolCall(1, "new_project", rawArgs)
+	})
+
+	// The scaffold writes messages to stdout before the JSON-RPC response.
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	jsonLine := lines[len(lines)-1]
+
+	var resp Response
+	if err := json.Unmarshal([]byte(jsonLine), &resp); err != nil {
+		t.Fatalf("expected valid JSON response, got: %s", jsonLine)
+	}
+
+	// Must be an error response
+	resultJSON, _ := json.Marshal(resp.Result)
+	var tcr ToolCallResponse
+	if err := json.Unmarshal(resultJSON, &tcr); err != nil {
+		t.Fatalf("expected ToolCallResponse, got: %s", string(resultJSON))
+	}
+	if !tcr.IsError {
+		t.Fatalf("expected error for missing pack, got success: %s", tcr.Content[0].Text)
+	}
+	if !strings.Contains(tcr.Content[0].Text, "express") {
+		t.Errorf("error message should mention 'express', got: %s", tcr.Content[0].Text)
+	}
+}
