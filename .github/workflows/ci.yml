@@ -21,7 +21,7 @@ jobs:
 
       - name: Check formatting
         run: |
-          unformatted=$(gofmt -l .)
+          unformatted=$(gofmt -l $(find . -name '*.go' -not -path './.git/*'))
           if [ -n "$unformatted" ]; then
             echo "Unformatted files:"
             echo "$unformatted"
@@ -47,6 +47,6 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.8
