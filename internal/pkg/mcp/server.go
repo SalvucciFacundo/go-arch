@@ -11,6 +11,7 @@ import (
 	"go-arch/internal/pkg/packs"
 	"go-arch/internal/pkg/scaffold"
 	"go-arch/internal/pkg/validator"
+	"go-arch/internal/pkg/workspace"
 	"go-arch/internal/ui"
 	"io"
 	"os"
@@ -260,13 +261,21 @@ func handleRequest(req *Request) {
 				},
 				map[string]interface{}{
 					"name":        "upgrade_project",
-					"description": "Propagate embedded template changes to a previously generated project. Returns a classified plan (upgradable / protected / absent). Dry-run by default — mutates nothing. Set apply: true to commit changes.",
+					"description": "Propagate embedded template changes to a previously generated project. Returns a classified plan (upgradable / protected / absent). Dry-run by default — mutates nothing. Set apply: true to commit changes. When service is set, upgrades that service from its workspace (chdir-free via root injection).",
 					"inputSchema": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
 							"projectPath": map[string]interface{}{
 								"type":        "string",
 								"description": "Optional: Path to the project root containing .go-arch.yaml",
+							},
+							"service": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: upgrade only this service from the workspace. Requires workspacePath or a discoverable workspace.",
+							},
+							"workspacePath": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: path to go-arch.workspace.yaml (used with service).",
 							},
 							"apply": map[string]interface{}{
 								"type":        "boolean",
@@ -331,6 +340,57 @@ func handleRequest(req *Request) {
 							},
 						},
 						"required": []string{"name"},
+					},
+				},
+				map[string]interface{}{
+					"name":        "workspace_list",
+					"description": "List the services in a go-arch.workspace.yaml (name, path, template). Requires a workspacePath or a discoverable workspace from the current directory.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"workspacePath": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: path to go-arch.workspace.yaml. Default: discover upward from the current directory.",
+							},
+						},
+					},
+				},
+				map[string]interface{}{
+					"name":        "workspace_upgrade",
+					"description": "Upgrade services in a workspace (all by default, or a single service via the service param). Dry-run by default; set apply: true to commit changes. Chdir-free — resolves each service root and injects it.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"workspacePath": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: path to go-arch.workspace.yaml. Default: discover upward.",
+							},
+							"service": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: upgrade only this service. Default: all services.",
+							},
+							"apply": map[string]interface{}{
+								"type":        "boolean",
+								"description": "When true, apply all upgradable changes per service. Default false (dry-run).",
+							},
+						},
+					},
+				},
+				map[string]interface{}{
+					"name":        "workspace_check",
+					"description": "Run the architecture check for services in a workspace (all by default, or a single service via the service param).",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"workspacePath": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: path to go-arch.workspace.yaml. Default: discover upward.",
+							},
+							"service": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: check only this service. Default: all services.",
+							},
+						},
 					},
 				},
 			},
@@ -885,11 +945,24 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 
 	case "upgrade_project":
 		var args struct {
-			ProjectPath string `json:"projectPath"`
-			Apply       bool   `json:"apply"`
+			ProjectPath   string `json:"projectPath"`
+			Service       string `json:"service"`
+			WorkspacePath string `json:"workspacePath"`
+			Apply         bool   `json:"apply"`
 		}
 		if err := json.Unmarshal(arguments, &args); err != nil {
 			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+
+		// Workspace service upgrade: chdir-free via WithRoot injection.
+		if args.Service != "" {
+			ws, err := resolveMCWorkspace(args.WorkspacePath)
+			if err != nil {
+				sendToolResult(id, toolResultError(err), true)
+				return
+			}
+			handleMCWorkspaceUpgrade(id, ws, args.Service, args.Apply)
 			return
 		}
 
@@ -999,6 +1072,67 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			return
 		}
 		handleUpdatePack(id, args.Name, args.AllowHooks, packs.RealDownloader{})
+
+	case "workspace_list":
+		var args struct {
+			WorkspacePath string `json:"workspacePath"`
+		}
+		if err := json.Unmarshal(arguments, &args); err != nil {
+			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+		ws, err := resolveMCWorkspace(args.WorkspacePath)
+		if err != nil {
+			sendToolResult(id, toolResultError(err), true)
+			return
+		}
+		type svcInfo struct {
+			Name     string `json:"name"`
+			Path     string `json:"path"`
+			Template string `json:"template,omitempty"`
+		}
+		var out []svcInfo
+		for _, s := range ws.Services {
+			out = append(out, svcInfo{Name: s.Name, Path: s.Path, Template: s.Template})
+		}
+		if out == nil {
+			out = []svcInfo{}
+		}
+		result, _ := json.MarshalIndent(out, "", "  ")
+		sendToolResult(id, string(result), false)
+
+	case "workspace_upgrade":
+		var args struct {
+			WorkspacePath string `json:"workspacePath"`
+			Service       string `json:"service"`
+			Apply         bool   `json:"apply"`
+		}
+		if err := json.Unmarshal(arguments, &args); err != nil {
+			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+		ws, err := resolveMCWorkspace(args.WorkspacePath)
+		if err != nil {
+			sendToolResult(id, toolResultError(err), true)
+			return
+		}
+		handleMCWorkspaceUpgrade(id, ws, args.Service, args.Apply)
+
+	case "workspace_check":
+		var args struct {
+			WorkspacePath string `json:"workspacePath"`
+			Service       string `json:"service"`
+		}
+		if err := json.Unmarshal(arguments, &args); err != nil {
+			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+		ws, err := resolveMCWorkspace(args.WorkspacePath)
+		if err != nil {
+			sendToolResult(id, toolResultError(err), true)
+			return
+		}
+		handleMCWorkspaceCheck(id, ws, args.Service)
 
 	default:
 		sendError(id, -32601, "Tool not found", nil)
@@ -1123,4 +1257,306 @@ func formatMCGeneratorError(err error) string {
 		}
 	}
 	return fmt.Sprintf("Error executing pack generator: %v", err)
+}
+
+// ---------------------------------------------------------------------------
+// Workspace MCP helpers
+// ---------------------------------------------------------------------------
+
+// resolveMCWorkspace returns the workspace for a request: an explicit
+// workspacePath param wins, otherwise upward discovery from the MCP server's
+// CWD. This mirrors the CLI's resolveWorkspace but lives in mcp to avoid the
+// cmd→mcp import cycle.
+func resolveMCWorkspace(workspacePath string) (*workspace.Workspace, error) {
+	if workspacePath != "" {
+		return workspace.Load(workspacePath)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, oops.Code("workspace_invalid").Wrapf(err, "cannot resolve working directory")
+	}
+	path, err := workspace.Discover(cwd)
+	if err != nil {
+		return nil, err
+	}
+	return workspace.Load(path)
+}
+
+// findMCService returns the named service from the workspace.
+func findMCService(ws *workspace.Workspace, name string) (*workspace.Service, error) {
+	svc, ok := ws.Find(name)
+	if !ok {
+		return nil, oops.
+			Code("service_not_found").
+			Errorf("service %q not found in workspace", name)
+	}
+	return svc, nil
+}
+
+// toolResultError formats an error as the structured tool-result body
+// {error: {code, message}}. Business errors flow INSIDE the content JSON,
+// not as JSON-RPC -326xx errors.
+func toolResultError(err error) string {
+	code := ""
+	var oErr oops.OopsError
+	if errors.As(err, &oErr) {
+		if c, ok := oErr.Code().(string); ok {
+			code = c
+		}
+	}
+	type errBody struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	body := map[string]interface{}{
+		"error": errBody{Code: code, Message: err.Error()},
+	}
+	data, _ := json.MarshalIndent(body, "", "  ")
+	return string(data)
+}
+
+// upgradeMCService upgrades one service chdir-free via WithRoot injection.
+// On missing manifest (legacy): returns {status:"skipped", error:{code:
+// "service_no_manifest"}} — the batch continues. NOTE: the CLI FAILS here
+// (upgradeOneService returns service_no_manifest → non-zero exit); the MCP
+// spec DELIBERATELY diverges — a missing manifest is a non-fatal skip so the
+// batch continues (workspace-no-manifest requirement).
+func upgradeMCService(ws *workspace.Workspace, svc *workspace.Service, apply bool) (map[string]any, error) {
+	root := ws.ResolvePath(svc)
+	if _, err := os.Stat(root); err != nil || !isDir(root) {
+		return nil, oops.
+			Code("service_path_missing").
+			Errorf("service %q path %s does not exist", svc.Name, root)
+	}
+
+	viper.Reset()
+	viper.SetConfigFile(filepath.Join(root, ".go-arch.yaml"))
+	_ = viper.ReadInConfig() // best-effort: missing config = legacy service
+
+	projectName := viper.GetString("project_name")
+	if projectName == "" {
+		return map[string]any{
+			"name":   svc.Name,
+			"status": "skipped",
+			"error": map[string]string{
+				"code":    "service_no_manifest",
+				"message": fmt.Sprintf("service %q has no manifest", svc.Name),
+			},
+		}, nil
+	}
+
+	cfg := &ui.ProjectConfig{
+		ProjectName:  projectName,
+		ModuleName:   viper.GetString("module_name"),
+		Architecture: viper.GetString("architecture"),
+		DBDriver:     viper.GetString("db_driver"),
+		UseDocker:    viper.GetBool("use_docker"),
+		UseTemplHTMX: viper.GetBool("use_templ_htmx"),
+	}
+
+	plan, err := scaffold.Upgrade(cfg,
+		scaffold.WithRoot(root),
+		scaffold.WithResolver(scaffold.DefaultResolver{}),
+	)
+	if err != nil {
+		return nil, oops.
+			Code("workspace_upgrade_failed").
+			Wrapf(err, "service %q upgrade classification failed", svc.Name)
+	}
+
+	entry := map[string]any{
+		"name":          svc.Name,
+		"status":        "success",
+		"upgradable":    plan.CountBy(scaffold.ClassUpgradable),
+		"protected":     plan.CountBy(scaffold.ClassProtected),
+		"absent":        plan.CountBy(scaffold.ClassAbsent),
+		"files_changed": 0,
+	}
+
+	if apply {
+		if plan.CountBy(scaffold.ClassUpgradable) == 0 {
+			return entry, nil
+		}
+		applied, applyErr := plan.Apply()
+		if applyErr != nil {
+			return nil, oops.
+				Code("workspace_upgrade_failed").
+				Wrapf(applyErr, "service %q apply failed", svc.Name)
+		}
+		_ = scaffold.WriteVersionField(filepath.Join(root, ".go-arch.yaml"), Version)
+		entry["files_changed"] = applied
+	}
+
+	return entry, nil
+}
+
+// checkMCService runs the architecture check for one service (chdir+defer —
+// the validator walks "internal" relative to CWD). On missing manifest:
+// returns {status:"failed", error:{code:"service_no_manifest"}} — mirrors
+// cmd/check.go which errors on empty project_name.
+func checkMCService(ws *workspace.Workspace, svc *workspace.Service) (map[string]any, error) {
+	root := ws.ResolvePath(svc)
+	if _, err := os.Stat(root); err != nil || !isDir(root) {
+		return nil, oops.
+			Code("service_path_missing").
+			Errorf("service %q path %s does not exist", svc.Name, root)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		return nil, oops.Code("workspace_invalid").Wrap(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		return nil, oops.Code("workspace_invalid").Wrapf(err, "cannot enter %s", root)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	viper.Reset()
+	viper.AddConfigPath(".")
+	viper.SetConfigName(".go-arch")
+	_ = viper.ReadInConfig() // best-effort
+
+	projectName := viper.GetString("project_name")
+	if projectName == "" {
+		return map[string]any{
+			"name":   svc.Name,
+			"status": "failed",
+			"error": map[string]string{
+				"code":    "service_no_manifest",
+				"message": fmt.Sprintf("service %q has no manifest", svc.Name),
+			},
+		}, nil
+	}
+
+	cfg := &ui.ProjectConfig{
+		ProjectName:  projectName,
+		ModuleName:   viper.GetString("module_name"),
+		Architecture: viper.GetString("architecture"),
+	}
+
+	v := validator.NewValidator(cfg)
+	violations, err := v.Validate()
+	if err != nil {
+		return nil, oops.
+			Code("workspace_check_failed").
+			Wrapf(err, "service %q check failed", svc.Name)
+	}
+
+	return map[string]any{
+		"name":       svc.Name,
+		"status":     "success",
+		"violations": len(violations),
+	}, nil
+}
+
+// isDir reports whether path is a directory.
+func isDir(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
+}
+
+// handleMCWorkspaceUpgrade runs the upgrade over all services (or one) and
+// sends a structured per-service result. Continue-on-error.
+func handleMCWorkspaceUpgrade(id interface{}, ws *workspace.Workspace, serviceName string, apply bool) {
+	services := ws.Services
+	if serviceName != "" {
+		svc, err := findMCService(ws, serviceName)
+		if err != nil {
+			sendToolResult(id, toolResultError(err), true)
+			return
+		}
+		services = []workspace.Service{*svc}
+	}
+
+	results := []map[string]any{}
+	failed := 0
+	for _, svc := range services {
+		entry, err := upgradeMCService(ws, &svc, apply)
+		if err != nil {
+			failed++
+			results = append(results, map[string]any{
+				"name":   svc.Name,
+				"status": "failed",
+				"error":  toolResultErrorBody(err),
+			})
+			continue
+		}
+		if entry["status"] == "failed" {
+			failed++
+		}
+		results = append(results, entry)
+	}
+
+	status := "ok"
+	if failed > 0 && len(results) > failed {
+		status = "partial"
+	} else if failed > 0 {
+		status = "failed"
+	}
+
+	resp := map[string]any{
+		"status":   status,
+		"services": results,
+	}
+	data, _ := json.MarshalIndent(resp, "", "  ")
+	sendToolResult(id, string(data), failed > 0)
+}
+
+// handleMCWorkspaceCheck runs the architecture check over all services (or
+// one) and sends a structured per-service result. Continue-on-error.
+func handleMCWorkspaceCheck(id interface{}, ws *workspace.Workspace, serviceName string) {
+	services := ws.Services
+	if serviceName != "" {
+		svc, err := findMCService(ws, serviceName)
+		if err != nil {
+			sendToolResult(id, toolResultError(err), true)
+			return
+		}
+		services = []workspace.Service{*svc}
+	}
+
+	results := []map[string]any{}
+	failed := 0
+	for _, svc := range services {
+		entry, err := checkMCService(ws, &svc)
+		if err != nil {
+			failed++
+			results = append(results, map[string]any{
+				"name":   svc.Name,
+				"status": "failed",
+				"error":  toolResultErrorBody(err),
+			})
+			continue
+		}
+		if entry["status"] == "failed" {
+			failed++
+		}
+		results = append(results, entry)
+	}
+
+	status := "ok"
+	if failed > 0 && len(results) > failed {
+		status = "partial"
+	} else if failed > 0 {
+		status = "failed"
+	}
+
+	resp := map[string]any{
+		"status":   status,
+		"services": results,
+	}
+	data, _ := json.MarshalIndent(resp, "", "  ")
+	sendToolResult(id, string(data), failed > 0)
+}
+
+// toolResultErrorBody returns the {code, message} map form of an error.
+func toolResultErrorBody(err error) map[string]string {
+	code := ""
+	var oErr oops.OopsError
+	if errors.As(err, &oErr) {
+		if c, ok := oErr.Code().(string); ok {
+			code = c
+		}
+	}
+	return map[string]string{"code": code, "message": err.Error()}
 }
