@@ -128,7 +128,26 @@ Validates the project's **Architectural Health**. This command is intended to be
 
 ---
 
-## 7. `mcp` 🤖
+## 7. `workspace` 🗂️
+
+**Usage**: `go-arch workspace <upgrade|check>`
+
+Operates on multiple services defined in a `go-arch.workspace.yaml` at the monorepo root. See [Workspaces](./workspaces.md) for the full reference.
+
+- **`workspace upgrade`** — upgrades every service in declaration order (dry-run by default; `--yes` applies). Continue-on-error with per-service summary.
+- **`workspace check`** — runs the architecture check for every service with per-service summary.
+- **`--service <name>`** (on `generate`, `check`, `upgrade`) — target a single service from anywhere inside the monorepo.
+
+```bash
+go-arch workspace upgrade
+go-arch workspace upgrade --yes
+go-arch workspace check
+go-arch generate crud User --service orders
+```
+
+---
+
+## 8. `mcp` 🤖
 **Usage**: `go-arch mcp`
 
 Launches the Model Context Protocol (MCP) server over standard I/O (stdio).
@@ -154,7 +173,7 @@ Every CLI command has a corresponding MCP tool for agents:
 
 ---
 
-## 8. `doctor` 🩺
+## 9. `doctor` 🩺
 **Usage**: `go-arch doctor`
 
 Runs environment diagnostics and reports issues found:
@@ -168,14 +187,14 @@ Exits non-zero when any check fails, so it is safe to use in scripts and CI.
 
 ---
 
-## 9. `version` 🏷️
+## 10. `version` 🏷️
 **Usage**: `go-arch version`
 
 Prints the build version. When built via GoReleaser (tagged release), the version is injected automatically. Local development builds print `dev`.
 
 ---
 
-## 10. Metadata System (`.go-arch.yaml`) 📄
+## 11. Metadata System (`.go-arch.yaml`) 📄
 
 The CLI is stateless, meaning it doesn't store your project data in a database. Instead, it uses this YAML file as the **Source of Truth**.
 - **Architecture Locking**: Prevents generating components that don't match the project's initial architecture.
