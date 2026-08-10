@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/spf13/cobra"
@@ -50,17 +48,6 @@ func loadServiceConfig() func() {
 		_ = viper.ReadInConfig()
 	}
 	return restore
-}
-
-// dirExists reports whether path is an existing directory.
-func dirExists(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && fi.IsDir()
-}
-
-// resolveServicePath joins a workspace dir with a service's relative path.
-func resolveServicePath(wsDir, svcPath string) string {
-	return filepath.Join(wsDir, filepath.FromSlash(svcPath))
 }
 
 // addServiceFlag registers the --service flag on a command.
