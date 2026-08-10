@@ -122,6 +122,10 @@ func Run(ctx context.Context, g Generator, opts RunOptions) ([]Record, error) {
 				Code(CodeGeneratorStepFailed).
 				Wrapf(err, "generator %q pre-hook failed", opts.GeneratorName)
 		}
+	} else if !opts.HooksEnabled && (len(g.Pre) > 0 || len(g.Post) > 0) {
+		// Warn when generator hooks are skipped due to trust gate.
+		fmt.Fprintf(opts.Out, "⚠ generator_run_skipped_trust: generator %q hooks skipped; hooks not enabled for pack %q\n",
+			opts.GeneratorName, opts.PackName)
 	}
 
 	// Linear step execution.

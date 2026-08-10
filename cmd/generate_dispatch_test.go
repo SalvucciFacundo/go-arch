@@ -220,3 +220,129 @@ architecture: Standard
 		t.Errorf("error should contain unknown_generator: %v", err)
 	}
 }
+
+// TestGenerate_PackNotInstalled verifies that generate emits pack_not_installed
+// when .go-arch.yaml declares template: <pack> but the pack is not installed
+// and the requested type is not a component type.
+func TestGenerate_PackNotInstalled_Error(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gen-pni-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Declare template: missingpack (not installed), no pack dirs set up.
+	configYAML := `project_name: "TestPNI"
+module_name: github.com/test/pni
+architecture: Standard
+template: missingpack@1.0.0
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = generateCmd.Flags().Set("list", "false")
+
+	buf := new(bytes.Buffer)
+	RootCmd.SetOut(buf)
+	RootCmd.SetErr(buf)
+	RootCmd.SetArgs([]string{"generate", "docker", "whatever"})
+
+	err = RootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected pack_not_installed error for missing pack")
+	}
+
+	errMsg := err.Error() + "\n" + buf.String()
+	if !strings.Contains(errMsg, "missingpack") {
+		t.Errorf("error should name pack 'missingpack', got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "not installed") {
+		t.Errorf("error should say 'not installed', got: %s", errMsg)
+	}
+}
+
+// TestGenerate_PackNotInstalled_ComponentStillWorks verifies that component
+// types work even when the template pack is not installed.
+func TestGenerate_PackNotInstalled_ComponentStillWorks(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gen-pni-comp-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	configYAML := `project_name: "TestPNIComp"
+module_name: github.com/test/pnicomp
+architecture: Standard
+template: missingpack@1.0.0
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = generateCmd.Flags().Set("list", "false")
+
+	buf := new(bytes.Buffer)
+	RootCmd.SetOut(buf)
+	RootCmd.SetErr(buf)
+	RootCmd.SetArgs([]string{"generate", "service", "Order"})
+
+	err = RootCmd.Execute()
+	if err != nil {
+		t.Fatalf("component generation should still work without pack: %v\nOutput: %s", err, buf.String())
+	}
+}
+
+// TestGenerate_UnknownGenerator_GroupedListing verifies that the
+// unknown_generator error groups available names by source.
+func TestGenerate_UnknownGenerator_GroupedListing(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gen-ug-grouped-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	configYAML := `project_name: "TestUGGrouped"
+module_name: github.com/test/uggrouped
+architecture: Standard
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = generateCmd.Flags().Set("list", "false")
+
+	buf := new(bytes.Buffer)
+	RootCmd.SetOut(buf)
+	RootCmd.SetErr(buf)
+	RootCmd.SetArgs([]string{"generate", "bogus999", "Whatevs"})
+
+	err = RootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for unknown generator")
+	}
+
+	errMsg := err.Error() + "\n" + buf.String()
+	// Should contain grouped listing.
+	if !strings.Contains(errMsg, "component types:") {
+		t.Errorf("error should list component types, got: %s", errMsg)
+	}
+	// Should mention service, repository etc.
+	for _, want := range []string{"service", "repository", "handler", "crud", "page", "component"} {
+		if !strings.Contains(errMsg, want) {
+			t.Errorf("error should mention component type %q, got: %s", want, errMsg)
+		}
+	}
+}

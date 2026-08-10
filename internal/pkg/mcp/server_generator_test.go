@@ -145,6 +145,70 @@ architecture: Standard
 	if !strings.Contains(errMsg, "unknown") && !strings.Contains(errMsg, "generator") {
 		t.Errorf("error should indicate unknown generator, got: %s", errMsg)
 	}
+	// Error should include the unknown_generator code/grouped listing.
+	if !strings.Contains(errMsg, "unknown_generator") {
+		t.Errorf("error should contain 'unknown_generator', got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "component types") && !strings.Contains(errMsg, "component") {
+		t.Errorf("error should list component types, got: %s", errMsg)
+	}
+}
+
+// TestMCPServer_GenerateComponent_PackNotInstalled verifies that when
+// .go-arch.yaml declares template: <pack> but the pack is not installed,
+// MCP generate_component returns pack_not_installed for non-component types.
+func TestMCPServer_GenerateComponent_PackNotInstalled(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "mcp-pni-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	configYAML := `project_name: "TestMCPPNI"
+module_name: github.com/test/mcppni
+architecture: Standard
+template: missingpack@1.0.0
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := captureStdout(func() {
+		args, _ := json.Marshal(map[string]interface{}{
+			"type": "docker",
+			"name": "whatevs",
+		})
+		var rawArgs json.RawMessage = args
+		handleToolCall(10, "generate_component", rawArgs)
+	})
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	jsonLine := lines[len(lines)-1]
+
+	var resp Response
+	if err := json.Unmarshal([]byte(jsonLine), &resp); err != nil {
+		t.Fatalf("expected valid JSON response, got: %s", jsonLine)
+	}
+
+	resultJSON, _ := json.Marshal(resp.Result)
+	var tcr ToolCallResponse
+	if err := json.Unmarshal(resultJSON, &tcr); err != nil {
+		t.Fatalf("expected ToolCallResponse, got: %s", string(resultJSON))
+	}
+	if !tcr.IsError {
+		t.Fatal("expected error (pack_not_installed), got success")
+	}
+	errMsg := tcr.Content[0].Text
+	if !strings.Contains(errMsg, "pack_not_installed") {
+		t.Errorf("error should contain 'pack_not_installed', got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "missingpack") {
+		t.Errorf("error should name pack 'missingpack', got: %s", errMsg)
+	}
 }
 
 func TestMCPServer_ListGenerators(t *testing.T) {

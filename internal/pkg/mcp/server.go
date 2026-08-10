@@ -171,49 +171,49 @@ func handleRequest(req *Request) {
 						"required": []string{"projectName", "moduleName"},
 					},
 				},
-			map[string]interface{}{
-				"name":        "list_generators",
-				"description": "List available generators for the current project: pack generators (if installed), builtin generators, and component types.",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"projectPath": map[string]interface{}{
-							"type":        "string",
-							"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
+				map[string]interface{}{
+					"name":        "list_generators",
+					"description": "List available generators for the current project: pack generators (if installed), builtin generators, and component types.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"projectPath": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
+							},
 						},
 					},
 				},
-			},
-			map[string]interface{}{
-				"name":        "generate_component",
-				"description": "Generate components using pack generators, builtin generators, or standard component types (service, repository, handler, crud, page, component) for the project.",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"type": map[string]interface{}{
-							"type":        "string",
-							"description": "Type of the component to generate or generator name (pack/builtin/component type)",
+				map[string]interface{}{
+					"name":        "generate_component",
+					"description": "Generate components using pack generators, builtin generators, or standard component types (service, repository, handler, crud, page, component) for the project.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"type": map[string]interface{}{
+								"type":        "string",
+								"description": "Type of the component to generate or generator name (pack/builtin/component type)",
+							},
+							"name": map[string]interface{}{
+								"type":        "string",
+								"description": "Name of the entity or component (e.g. User, Product)",
+							},
+							"projectPath": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
+							},
+							"route": map[string]interface{}{
+								"type":        "string",
+								"description": "Route pattern for handler type (e.g. 'GET /stats'). Ignored for other types.",
+							},
+							"generatorArgs": map[string]interface{}{
+								"type":        "object",
+								"description": "Optional: Arguments for pack generator prompt resolution (e.g. {\"port\": \"3000\"})",
+							},
 						},
-						"name": map[string]interface{}{
-							"type":        "string",
-							"description": "Name of the entity or component (e.g. User, Product)",
-						},
-						"projectPath": map[string]interface{}{
-							"type":        "string",
-							"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
-						},
-						"route": map[string]interface{}{
-							"type":        "string",
-							"description": "Route pattern for handler type (e.g. 'GET /stats'). Ignored for other types.",
-						},
-						"generatorArgs": map[string]interface{}{
-							"type":        "object",
-							"description": "Optional: Arguments for pack generator prompt resolution (e.g. {\"port\": \"3000\"})",
-						},
+						"required": []string{"type", "name"},
 					},
-					"required": []string{"type", "name"},
 				},
-			},
 				map[string]interface{}{
 					"name":        "check_architecture",
 					"description": "Run architectural rules checks, validating import rules and package directory structures.",
@@ -500,12 +500,21 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 		}
 
 		// Tier 2 & 3: component types.
-		knownTypes := map[string]bool{
-			"service": true, "repository": true, "handler": true,
-			"crud": true, "page": true, "component": true,
+		// If template was set but pack couldn't serve the generator,
+		// and the type is not a known component type, emit pack_not_installed.
+		if templateName != "" && !isMCKnownComponentType(args.Type) {
+			sendToolResult(id, fmt.Sprintf(
+				"pack_not_installed: pack %q is not installed. Run 'go-arch template install' to install it.",
+				templateName,
+			), true)
+			return
 		}
-		if !knownTypes[args.Type] {
-			sendToolResult(id, fmt.Sprintf("Unknown generator %q: use --list to see available generators", args.Type), true)
+
+		if !isMCKnownComponentType(args.Type) {
+			sendToolResult(id, fmt.Sprintf(
+				"unknown_generator: unknown generator %q. Component types: service, repository, handler, crud, page, component.",
+				args.Type,
+			), true)
 			return
 		}
 
@@ -861,4 +870,13 @@ func sendToolResult(id interface{}, text string, isError bool) {
 		},
 		IsError: isError,
 	})
+}
+
+// isMCKnownComponentType returns true if t is a built-in component type.
+func isMCKnownComponentType(t string) bool {
+	switch t {
+	case "service", "repository", "handler", "crud", "page", "component":
+		return true
+	}
+	return false
 }

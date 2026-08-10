@@ -701,7 +701,7 @@ func (s *Scaffolder) GeneratePackGenerator(name string, args map[string]any) err
 	}
 	if failedPrompt != "" {
 		return oops.
-			Code(generators.CodeMissingGeneratorArgument).
+			Code(generators.CodeGeneratorPromptUnresolvable).
 			Errorf("required prompt %q not provided for generator %q", failedPrompt, name)
 	}
 
@@ -858,7 +858,7 @@ func (r *mapPromptResolver) Resolve(name, message, def string, required bool) (s
 	}
 	if required {
 		return "", oops.
-			Code(generators.CodeMissingGeneratorArgument).
+			Code(generators.CodeGeneratorPromptUnresolvable).
 			Errorf("required prompt %q not provided and has no default", name)
 	}
 	return "", nil
