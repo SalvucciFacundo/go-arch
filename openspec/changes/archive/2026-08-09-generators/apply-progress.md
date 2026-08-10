@@ -182,5 +182,44 @@ New tests (7):
 ## Commits
 | Hash | Message |
 |------|---------|
-| (pending) | fix(generators): wire recipe validation at load and emit pack_not_installed |
-| (pending) | test(generators): production-path validation, missing pack, grouped listing, hooks warning |
+| 41e3454 | fix(generators): wire recipe validation at load and emit pack_not_installed |
+| 293acdd | docs(sdd): amend spec for dual-entry refinement and fix TDD evidence |
+| 1d14ac3 | fix(generators): distinguish missing pack from absent generator and restore MCP arg code |
+| 725a9a9 | test(generators): cover dispatch discrimination and MCP/CLI prompt codes |
+
+## Second Corrective Fix (Post-ReVerify) — 2026-08-09
+
+### Regressions Fixed
+
+| # | Finding | Fix | Evidence |
+|---|---------|-----|----------|
+| NEW-CRITICAL-1 | pack_not_installed over-reach (REQ-10 S1 / REQ-22 S3) | Track `packResolved` in cmd/generate.go and mcp/server.go; only emit pack_not_installed when pack genuinely fails to resolve; when pack IS installed but lacks generator, fall through to unknown_generator grouped listing | `TestGenerate_PackInstalled_UnknownGenerator_GroupedListing` (CLI) + `TestMCPServer_GenerateComponent_WithTemplate_UnknownType` (MCP) |
+| NEW-CRITICAL-2 | MCP prompt code regression (REQ-25 S1) | Add `GeneratePackOption` / `WithPromptErrorCode` to scaffold; CLI uses default `CodeGeneratorPromptUnresolvable`, MCP passes `CodeMissingGeneratorArgument` | `TestMCPServer_GenerateComponent_MissingRequiredArg`; tightened `executor_test.go` L416 |
+
+### Files Changed
+
+| File | Action | What Was Done |
+|------|--------|---------------|
+| `internal/pkg/scaffold/scaffold.go` | Modified | Added `GeneratePackConfig`, `GeneratePackOption`, `WithPromptErrorCode`; `GeneratePackGenerator` accepts variadic opts; `mapPromptResolver` uses configurable `errorCode` |
+| `cmd/generate.go` | Modified | Track `packResolved` bool; only emit `pack_not_installed` when pack NOT resolved |
+| `internal/pkg/mcp/server.go` | Modified | Track `packResolved` bool; pass `WithPromptErrorCode(CodeMissingGeneratorArgument)` to scaffold; enhanced MCP unknown type error to list pack generators; added `formatMCGeneratorError` helper |
+| `cmd/generate_dispatch_test.go` | Modified | `TestGenerate_PackInstalled_UnknownGenerator_GroupedListing` — CLI installed-pack + unknown gen → grouped listing |
+| `internal/pkg/mcp/server_generator_test.go` | Modified | `TestMCPServer_GenerateComponent_WithTemplate_UnknownType` — MCP installed-pack + unknown gen; `TestMCPServer_GenerateComponent_MissingRequiredArg` — MCP missing required prompt → missing_generator_argument |
+| `internal/pkg/generators/executor_test.go` | Modified | Tightened dual-code assertion to exact `CodeGeneratorPromptUnresolvable` |
+| `internal/pkg/packs/manifest_v2_test.go` | Modified | `TestManifest_Load_V2ValidRecipe_WithRunStep_ParsesOK` — positive control for run step validation (REQ-03 S3) |
+
+### New Tests (5)
+
+- TestGenerate_PackInstalled_UnknownGenerator_GroupedListing (cmd) — REGRESSION GUARD
+- TestMCPServer_GenerateComponent_WithTemplate_UnknownType (mcp) — REGRESSION GUARD
+- TestMCPServer_GenerateComponent_MissingRequiredArg (mcp) — REGRESSION GUARD
+- TestManifest_Load_V2ValidRecipe_WithRunStep_ParsesOK (packs) — REQ-03 S3
+- TestMCPServer_GenerateComponent_PromptCode_Discrimination (mcp) — doc-test
+
+### Test Evidence
+
+```
+go test ./... -count=1: 8 packages PASS (325 tests, +5 from prior 320)
+go vet ./...: clean
+gofmt -l .: clean
+```
