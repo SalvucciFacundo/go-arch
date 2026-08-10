@@ -196,6 +196,18 @@ Prints the build version. When built via GoReleaser (tagged release), the versio
 
 ---
 
+## 10b. `update` 🔄
+**Usage**: `go-arch update`
+
+Self-update: downloads the latest go-arch release from GitHub, verifies its SHA-256 checksum, and atomically replaces the currently running binary.
+
+- **Already up to date**: prints the latest version and exits 0.
+- **Checksum verification**: refuses to replace the binary on a mismatch.
+- **Permission denied** (e.g. `/usr/local/bin` without write access): prints the exact `sudo <binary> update` command to run.
+- Supports Linux, macOS, and Windows (amd64/arm64). Not available for local `dev` builds that predate this command — re-run `go install github.com/SalvucciFacundo/go-arch@latest` once.
+
+---
+
 ## 11. Metadata System (`.go-arch.yaml`) 📄
 
 The CLI is stateless, meaning it doesn't store your project data in a database. Instead, it uses this YAML file as the **Source of Truth**.
