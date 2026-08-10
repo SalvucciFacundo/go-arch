@@ -161,7 +161,6 @@ If **Docker Support** is enabled, the CLI generates:
 
 - [**Architecture Guide**](./docs/ARCHITECTURE.md)
 - [**Command Reference**](./docs/COMMANDS.md)
-- [**Multimodal Perception Protocol**](./docs/MULTIMODAL_PERCEPTION.md)
 
 ---
 Built with ❤️ for the Go Community by [SalvucciFacundo](https://github.com/SalvucciFacundo).
