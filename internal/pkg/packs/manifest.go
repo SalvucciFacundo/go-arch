@@ -7,12 +7,13 @@ import (
 	"regexp"
 
 	"github.com/samber/oops"
+	"go-arch/internal/pkg/generators"
 	"go-arch/internal/pkg/hooks"
 	"gopkg.in/yaml.v3"
 )
 
-// SupportedContractVersion is the only pack contract version this CLI accepts.
-const SupportedContractVersion = 1
+// SupportedContractVersions is the set of pack contract versions this CLI accepts.
+var SupportedContractVersions = []int{1, 2}
 
 // BinaryAsset describes a binary file to copy from the pack to the project.
 type BinaryAsset struct {
@@ -22,12 +23,13 @@ type BinaryAsset struct {
 
 // Manifest is the parsed go-arch.yaml from a pack root.
 type Manifest struct {
-	ContractVersion int                          `yaml:"contract_version"`
-	Name            string                       `yaml:"name"`
-	Version         string                       `yaml:"version"`
-	Layout          []string                     `yaml:"layout,omitempty"`
-	Hooks           map[hooks.Type][]hooks.Entry `yaml:"hooks,omitempty"`
-	BinaryAssets    []BinaryAsset                `yaml:"binary_assets,omitempty"`
+	ContractVersion int                             `yaml:"contract_version"`
+	Name            string                          `yaml:"name"`
+	Version         string                          `yaml:"version"`
+	Layout          []string                        `yaml:"layout,omitempty"`
+	Hooks           map[hooks.Type][]hooks.Entry    `yaml:"hooks,omitempty"`
+	BinaryAssets    []BinaryAsset                   `yaml:"binary_assets,omitempty"`
+	Generators      map[string]generators.Generator `yaml:"generators,omitempty"`
 }
 
 // slugRE matches pack names: lowercase alphanumeric + dashes only.
@@ -45,6 +47,7 @@ var knownManifestKeys = map[string]bool{
 	"layout":           true,
 	"hooks":            true,
 	"binary_assets":    true,
+	"generators":       true,
 }
 
 // UnmarshalYAML implements strict deserialization with validation.
@@ -122,6 +125,13 @@ func (m *Manifest) UnmarshalYAML(value *yaml.Node) error {
 					Code(CodeInvalidPackManifest).
 					Wrapf(err, "pack manifest: binary_assets")
 			}
+
+		case "generators":
+			if err := valNode.Decode(&m.Generators); err != nil {
+				return oops.
+					Code(CodeInvalidPackManifest).
+					Wrapf(err, "pack manifest: generators")
+			}
 		}
 	}
 
@@ -131,11 +141,11 @@ func (m *Manifest) UnmarshalYAML(value *yaml.Node) error {
 			Code(CodeInvalidPackManifest).
 			Errorf("pack manifest: missing required field \"contract_version\"")
 	}
-	if m.ContractVersion != SupportedContractVersion {
+	if !supportsContractVersion(m.ContractVersion) {
 		return oops.
 			Code(CodeContractVersionMismatch).
-			Errorf("pack %q requires contract v%d; this CLI supports v%d. Upgrade go-arch.",
-				m.Name, m.ContractVersion, SupportedContractVersion)
+			Errorf("pack %q requires contract v%d; this CLI supports contract v1–v2. Upgrade go-arch.",
+				m.Name, m.ContractVersion)
 	}
 
 	if !seen["name"] {
@@ -170,7 +180,24 @@ func (m *Manifest) UnmarshalYAML(value *yaml.Node) error {
 			Errorf("pack manifest: version %q is not a valid semver", m.Version)
 	}
 
+	// v1 packs must not declare generators (unknown to v1 contract).
+	if m.ContractVersion == 1 && len(m.Generators) > 0 {
+		return oops.
+			Code(CodeInvalidPackManifest).
+			Errorf("pack manifest: unknown key \"generators\"")
+	}
+
 	return nil
+}
+
+// supportsContractVersion returns true if v is in the supported set.
+func supportsContractVersion(v int) bool {
+	for _, sv := range SupportedContractVersions {
+		if sv == v {
+			return true
+		}
+	}
+	return false
 }
 
 // Load reads and validates a go-arch.yaml at the given directory.
