@@ -1525,6 +1525,377 @@ func TestUpgrade_PackSource_NonPackEntriesUnchanged(t *testing.T) {
 	}
 }
 
+// ──────────────────────────────────────────────────────────
+// Phase 6: Generator-origin upgrade tests (Slice 5)
+// ──────────────────────────────────────────────────────────
+
+// TestUpgrade_GeneratorOrigin_Protected verifies that a manifest entry
+// with origin: generator (no template field) is classified as PROTECTED
+// during upgrade. Generator output is logic output, not template renders,
+// and must never be silently overwritten.
+func TestUpgrade_GeneratorOrigin_Protected(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName: ".",
+		ModuleName:  "github.com/test/gen-protected",
+	}
+
+	// Write a generator-produced file on disk.
+	diskContent := []byte("# GENERATOR OUTPUT\ndocker-compose content\n")
+	if err := os.WriteFile("docker-compose.yml", diskContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	diskHash := hashBytesForTest(diskContent)
+
+	// Manifest entry: origin=generator, NO template field.
+	m := &Manifest{
+		Version: 1,
+		Files: map[string]ManifestEntry{
+			"docker-compose.yml": {
+				Path:   "docker-compose.yml",
+				SHA256: diskHash,
+				Origin: OriginGenerator,
+				Source: "pack:express@1.0.0",
+				Metadata: map[string]string{
+					"generator": "docker",
+					"args":      `{"compose": true}`,
+				},
+			},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture stderr for warning verification.
+	oldOut := ui.Out
+	defer func() { ui.Out = oldOut }()
+	var stderr bytes.Buffer
+	ui.Out = &stderr
+
+	plan, err := Upgrade(cfg)
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	protected := plan.CountBy(ClassProtected)
+	if protected != 1 {
+		t.Fatalf("protected count = %d, want 1", protected)
+	}
+
+	f := plan.Files[0]
+	if f.Path != "docker-compose.yml" {
+		t.Errorf("path = %q, want docker-compose.yml", f.Path)
+	}
+	if f.Classification != ClassProtected {
+		t.Errorf("classification = %q, want protected", f.Classification)
+	}
+	if f.Origin != OriginGenerator {
+		t.Errorf("origin = %q, want generator", f.Origin)
+	}
+
+	// Warning must mention the file path and PROTECTED.
+	warnOutput := stderr.String()
+	if !strings.Contains(warnOutput, "PROTECTED") {
+		t.Errorf("warning should contain 'PROTECTED', got: %s", warnOutput)
+	}
+	if !strings.Contains(warnOutput, "docker-compose.yml") {
+		t.Errorf("warning should name the file, got: %s", warnOutput)
+	}
+
+	// Apply should NOT write the file.
+	applied, err := plan.Apply()
+	if err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+	if applied != 0 {
+		t.Errorf("applied count = %d, want 0 (PROTECTED file should not be written)", applied)
+	}
+
+	diskAfter, _ := os.ReadFile("docker-compose.yml")
+	if !bytes.Equal(diskAfter, diskContent) {
+		t.Error("generator-origin file was modified by Apply()")
+	}
+}
+
+// TestUpgrade_GeneratorOrigin_PackRemoved_StillProtected verifies that
+// when the pack recorded in Source is removed, the generator-origin entry
+// remains PROTECTED — no error, no attempt to re-render.
+func TestUpgrade_GeneratorOrigin_PackRemoved_StillProtected(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName: ".",
+		ModuleName:  "github.com/test/gen-removed",
+	}
+
+	diskContent := []byte("# GENERATOR OUTPUT\nbinary output\n")
+	if err := os.MkdirAll("bin", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("bin/output.bin", diskContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	diskHash := hashBytesForTest(diskContent)
+
+	m := &Manifest{
+		Version: 1,
+		Files: map[string]ManifestEntry{
+			"bin/output.bin": {
+				Path:   "bin/output.bin",
+				SHA256: diskHash,
+				Origin: OriginGenerator,
+				Source: "pack:removed@0.1.0",
+				Metadata: map[string]string{
+					"generator": "binary-gen",
+				},
+			},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolver always returns not-installed.
+	resolver := &fakeResolver{
+		resolve: func(name, version string) (packs.PackInfo, error) {
+			return packs.PackInfo{}, oops.
+				Code(packs.CodePackNotInstalled).
+				Errorf("pack %q is not installed", name+"@"+version)
+		},
+	}
+
+	plan, err := Upgrade(cfg, WithResolver(resolver))
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	protected := plan.CountBy(ClassProtected)
+	if protected != 1 {
+		t.Fatalf("protected count = %d, want 1", protected)
+	}
+
+	f := plan.Files[0]
+	if f.Classification != ClassProtected {
+		t.Errorf("classification = %q, want protected (generator entries stay PROTECTED even with pack removed)", f.Classification)
+	}
+
+	// No "pack not installed" error — PROTECTED is the safe default.
+	if f.Origin != OriginGenerator {
+		t.Errorf("origin = %q, want generator", f.Origin)
+	}
+}
+
+// TestUpgrade_TemplateOriginWithGeneratorMetadata_Upgradable verifies that
+// a template-origin entry (origin: template) with metadata.generator is
+// still upgradable via renderPackEntry — byte-identical to a normal pack
+// template re-render.
+func TestUpgrade_TemplateOriginWithGeneratorMetadata_Upgradable(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName: ".",
+		ModuleName:  "github.com/test/gen-tmpl-upgradable",
+	}
+
+	// Embedded template renders V1 content.
+	engine := template.NewEngine()
+	var v1Buf bytes.Buffer
+	if err := engine.RenderTo(&v1Buf, "common/env.tmpl", cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	v1Content := v1Buf.Bytes()
+	v1Hash := hashBytesForTest(v1Content)
+
+	if err := os.WriteFile(".env", v1Content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Synthetic pack dir with V2 template content (differs from V1).
+	v2Template := "# PACK V2 ENV FROM GENERATOR\nDB_HOST=gen-host\n"
+	packDir := createPackTemplateDir(t, "express", "1.0.0", "common/env.tmpl", v2Template)
+
+	packInfo := packs.PackInfo{
+		Dir: packDir,
+		Manifest: &packs.Manifest{
+			Name:    "express",
+			Version: "1.0.0",
+		},
+	}
+
+	// Manifest entry: origin=template WITH metadata.generator (single-entry-with-metadata).
+	m := &Manifest{
+		Version: 1,
+		Files: map[string]ManifestEntry{
+			".env": {
+				Path:         ".env",
+				SHA256:       v1Hash,
+				Origin:       OriginTemplate,
+				TemplatePath: "common/env.tmpl",
+				Source:       "pack:express@1.0.0",
+				Metadata: map[string]string{
+					"generator": "docker",
+					"args":      `{"db_driver": "postgres"}`,
+				},
+			},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := &fakeResolver{
+		resolve: func(name, version string) (packs.PackInfo, error) {
+			if name == "express" && version == "1.0.0" {
+				return packInfo, nil
+			}
+			return packs.PackInfo{}, fmt.Errorf("not installed")
+		},
+	}
+
+	plan, err := Upgrade(cfg, WithResolver(resolver))
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	upgradable := plan.CountBy(ClassUpgradable)
+	if upgradable != 1 {
+		t.Fatalf("upgradable count = %d, want 1 (template-origin generator files are upgradable). Plan: %+v",
+			upgradable, plan.Files)
+	}
+
+	f := plan.Files[0]
+	if f.Path != ".env" {
+		t.Errorf("path = %q, want .env", f.Path)
+	}
+	if f.Classification != ClassUpgradable {
+		t.Errorf("classification = %q, want upgradable", f.Classification)
+	}
+	if f.Origin != OriginTemplate {
+		t.Errorf("origin = %q, want template", f.Origin)
+	}
+
+	// Apply should write the pack-rendered V2 content.
+	applied, err := plan.Apply()
+	if err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+	if applied != 1 {
+		t.Errorf("applied count = %d, want 1", applied)
+	}
+
+	diskAfter, _ := os.ReadFile(".env")
+	rendered := string(diskAfter)
+	if !strings.Contains(rendered, "PACK V2 ENV FROM GENERATOR") {
+		t.Errorf("disk content after apply does not come from pack:\n%s", rendered)
+	}
+}
+
+// TestUpgrade_GeneratorOrigin_NoReRun verifies that upgrade never attempts
+// to re-execute generator recipes. Generator entries remain PROTECTED
+// even when the pack has newer template content. Re-running generators
+// is deferred to v2.1.
+func TestUpgrade_GeneratorOrigin_NoReRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cfg := &ui.ProjectConfig{
+		ProjectName: ".",
+		ModuleName:  "github.com/test/gen-no-rerun",
+	}
+
+	diskContent := []byte("# GENERATOR V1 OUTPUT\n")
+	if err := os.WriteFile("docker-compose.yml", diskContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	diskHash := hashBytesForTest(diskContent)
+
+	// Pack has NEWER content, but generator entries should NOT be re-rendered.
+	v2Template := "# PACK V2 DOCKER CONTENT (should NOT be used)\n"
+	packDir := createPackTemplateDir(t, "express", "1.1.0", "docker-compose.yml.tmpl", v2Template)
+
+	packInfo := packs.PackInfo{
+		Dir: packDir,
+		Manifest: &packs.Manifest{
+			Name:    "express",
+			Version: "1.1.0",
+		},
+	}
+
+	m := &Manifest{
+		Version: 1,
+		Files: map[string]ManifestEntry{
+			"docker-compose.yml": {
+				Path:   "docker-compose.yml",
+				SHA256: diskHash,
+				Origin: OriginGenerator,
+				Source: "pack:express@1.1.0",
+				Metadata: map[string]string{
+					"generator": "docker",
+				},
+			},
+		},
+		dir: ".",
+	}
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := &fakeResolver{
+		resolve: func(name, version string) (packs.PackInfo, error) {
+			if name == "express" && version == "1.1.0" {
+				return packInfo, nil
+			}
+			return packs.PackInfo{}, fmt.Errorf("not installed")
+		},
+	}
+
+	plan, err := Upgrade(cfg, WithResolver(resolver))
+	if err != nil {
+		t.Fatalf("Upgrade failed: %v", err)
+	}
+
+	// Generator entries are PROTECTED — never re-rendered, even with pack available.
+	protected := plan.CountBy(ClassProtected)
+	if protected != 1 {
+		t.Fatalf("protected count = %d, want 1 (generator entries never re-rendered)", protected)
+	}
+
+	upgradable := plan.CountBy(ClassUpgradable)
+	if upgradable != 0 {
+		t.Errorf("upgradable count = %d, want 0 (no generator recipe re-run)", upgradable)
+	}
+
+	// Disk content must be unchanged.
+	diskAfter, _ := os.ReadFile("docker-compose.yml")
+	if !bytes.Equal(diskAfter, diskContent) {
+		t.Error("generator file was modified — should remain PROTECTED")
+	}
+}
+
 // TestLegacyUpgrade_CreatesRoutesGoWeb verifies the legacy fallback proposes
 // creating routes.go for a web project without a manifest (so the upgraded
 // main.go referencing router.Register compiles).

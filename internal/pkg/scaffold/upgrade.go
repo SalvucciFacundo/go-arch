@@ -96,6 +96,21 @@ func Upgrade(cfg *ui.ProjectConfig, opts ...UpgradeOption) (*UpgradePlan, error)
 			continue
 		}
 
+		// ── Generator-origin entries are PROTECTED ──
+		// Generator output is logic output, not template renders. The
+		// v1 re-render guarantee cannot hold — these entries are never
+		// silently overwritten. Re-running generators is deferred to v2.1.
+		if entry.Origin == OriginGenerator {
+			action := FileAction{
+				Path:           path,
+				Classification: ClassProtected,
+				Origin:         entry.Origin,
+			}
+			ui.Warning(fmt.Sprintf("entry %q is PROTECTED (generator output); re-run generator to update", path))
+			plan.Files = append(plan.Files, action)
+			continue
+		}
+
 		action := FileAction{
 			Path:         path,
 			Origin:       entry.Origin,

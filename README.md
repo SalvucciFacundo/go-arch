@@ -100,6 +100,16 @@ go-arch generate repository User
 go-arch generate crud Category # Complete CRUD implementation
 ```
 
+List all available generators (pack, builtin, and component types):
+```bash
+go-arch generate --list
+```
+
+If your project uses a template pack with declarative generators (`contract_version: 2`), `go-arch generate <name>` runs the pack's recipe — with prompt collection, template rendering, and optional run steps:
+```bash
+go-arch generate docker myservice
+```
+
 In projects scaffolded with the **templ + HTMX frontend**, you can also generate frontend parts:
 ```bash
 go-arch generate page Dashboard        # views/pages/dashboard.templ
@@ -112,7 +122,8 @@ Starts a native MCP server communicating over standard input/output (stdio), all
 go-arch mcp
 ```
 - `new_project` → `go-arch new`
-- `generate_component` → `go-arch generate` (incl. `page` / `component`)
+- `generate_component` → `go-arch generate` (incl. `page` / `component`, plus pack generators with `generatorArgs`)
+- `list_generators` → `go-arch generate --list`
 - `check_architecture` → `go-arch check`
 - `serve_project` → `go-arch serve` (returns the exact run command)
 - `setup_environment` → `go-arch setup` (detects, and can install `air` with consent)
@@ -150,6 +161,7 @@ If **Docker Support** is enabled, the CLI generates:
 
 - [**Architecture Guide**](./docs/ARCHITECTURE.md)
 - [**Command Reference**](./docs/COMMANDS.md)
+- [**Multimodal Perception Protocol**](./docs/MULTIMODAL_PERCEPTION.md)
 
 ---
 Built with ❤️ for the Go Community by [SalvucciFacundo](https://github.com/SalvucciFacundo).

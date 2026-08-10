@@ -2,7 +2,10 @@ package scaffold
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
+	"go-arch/internal/pkg/generators"
 	"go-arch/internal/pkg/hooks"
 	"go-arch/internal/pkg/packs"
 	"go-arch/internal/pkg/template"
@@ -657,6 +660,230 @@ func (s *Scaffolder) GenerateCRUD(name string) error {
 // strings with hyphens, and strings with leading digits.
 func isValidGoIdentifier(name string) bool {
 	return token.IsIdentifier(name)
+}
+
+// GeneratePackConfig holds optional configuration for GeneratePackGenerator.
+type GeneratePackConfig struct {
+	PromptErrorCode string
+}
+
+// GeneratePackOption configures optional behaviour for GeneratePackGenerator.
+type GeneratePackOption func(*GeneratePackConfig)
+
+// WithPromptErrorCode sets the oops error code used when a required prompt
+// cannot be resolved from args. MCP callers should use
+// CodeMissingGeneratorArgument; CLI non-interactive callers should use
+// CodeGeneratorPromptUnresolvable (the default).
+func WithPromptErrorCode(code string) GeneratePackOption {
+	return func(cfg *GeneratePackConfig) { cfg.PromptErrorCode = code }
+}
+
+// GeneratePackGenerator executes a named generator recipe from the
+// currently active pack (set via WithPackInfo). It performs pre-flight
+// prompt resolution from args, pre-flight sandbox validation, runs the
+// recipe via generators.Run, and records the resulting files in the
+// project manifest with generator provenance.
+func (s *Scaffolder) GeneratePackGenerator(name string, args map[string]any, opts ...GeneratePackOption) error {
+	cfg := &GeneratePackConfig{PromptErrorCode: generators.CodeGeneratorPromptUnresolvable}
+	for _, o := range opts {
+		o(cfg)
+	}
+
+	if s.packInfo == nil {
+		return oops.
+			Code(generators.CodePackNotInstalled).
+			Errorf("no pack configured; cannot run generator %q", name)
+	}
+
+	gen, ok := s.packInfo.Manifest.Generators[name]
+	if !ok {
+		// Collect available generator names for the error message.
+		names := make([]string, 0, len(s.packInfo.Manifest.Generators))
+		for k := range s.packInfo.Manifest.Generators {
+			names = append(names, k)
+		}
+		return oops.
+			Code(generators.CodeUnknownGenerator).
+			With("generator", name).
+			With("available", names).
+			Errorf("unknown generator %q for pack %q (available: %v)", name, s.packInfo.Manifest.Name, names)
+	}
+
+	// --- Pre-flight: prompt resolution ---
+	// Build ResolvedArgs from the caller-provided map, filling defaults
+	// for prompt steps that aren't in args.
+	resolvedArgs := make(map[string]any)
+	for k, v := range args {
+		resolvedArgs[k] = v
+	}
+	failedPrompt, err := s.resolveGeneratorPrompts(gen, args, resolvedArgs)
+	if err != nil {
+		return err
+	}
+	if failedPrompt != "" {
+		return oops.
+			Code(cfg.PromptErrorCode).
+			Errorf("required prompt %q not provided for generator %q", failedPrompt, name)
+	}
+
+	// Provide a PromptResolver to the executor so it doesn't overwrite
+	// our resolved values with defaults. It reads from the resolvedArgs
+	// that we already populated with args + defaults.
+	promptResolver := &mapPromptResolver{values: resolvedArgs, errorCode: cfg.PromptErrorCode}
+
+	// --- Pre-flight: sandbox validation ---
+	projectRoot, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	for i, step := range gen.Steps {
+		if step.Type == "template" || step.Type == "binary" {
+			if err := generators.ValidateTarget(projectRoot, step.To); err != nil {
+				return oops.
+					Code(generators.CodeRecipePathEscape).
+					Wrapf(err, "step %d (%s): target %q escapes project root", i, step.Type, step.To)
+			}
+		}
+	}
+
+	// --- HooksEnabled from sidecar ---
+	hooksEnabled := false
+	if sc, scErr := packs.ReadSidecar(s.packInfo.Dir); scErr == nil {
+		hooksEnabled = sc.HooksEnabled
+	}
+
+	// --- Build and execute ---
+	source := fmt.Sprintf("pack:%s@%s", s.packInfo.Manifest.Name, s.packInfo.Manifest.Version)
+
+	var firer *generators.Runner
+	if s.runner != nil {
+		genRunner := generators.NewRunner(s.runner.CommandRunner(), ui.Out)
+		firer = genRunner
+	}
+
+	runOpts := generators.RunOptions{
+		ProjectRoot:    projectRoot,
+		PackDir:        s.packInfo.Dir,
+		PackName:       s.packInfo.Manifest.Name,
+		PackVersion:    s.packInfo.Manifest.Version,
+		GeneratorName:  name,
+		HooksEnabled:   hooksEnabled,
+		CmdRunner:      hooks.RealRunner{},
+		Out:            ui.Out,
+		Firer:          firer,
+		TemplateData:   s.config,
+		ResolvedArgs:   resolvedArgs,
+		PromptResolver: promptResolver,
+	}
+
+	if s.runner != nil {
+		runOpts.CmdRunner = s.runner.CommandRunner()
+	}
+
+	ctx := s.buildContext()
+	records, runErr := generators.Run(ctx, gen, runOpts)
+	if runErr != nil {
+		return runErr
+	}
+
+	// --- Record manifest entries ---
+	argsJSON, err := json.Marshal(resolvedArgs)
+	if err != nil {
+		// Non-fatal: log warning but continue.
+		fmt.Fprintf(ui.Out, "warning: failed to marshal generator args: %v\n", err)
+		argsJSON = []byte("{}")
+	}
+	argsStr := string(argsJSON)
+
+	for _, rec := range records {
+		meta := map[string]string{
+			"generator": name,
+			"args":      argsStr,
+		}
+		// Merge any existing metadata from the record.
+		for k, v := range rec.Metadata {
+			if k != "generator" && k != "args" {
+				meta[k] = v
+			}
+		}
+
+		var origin Origin
+		switch rec.Origin {
+		case "template":
+			origin = OriginTemplate
+		case "generator":
+			origin = OriginGenerator
+		default:
+			origin = OriginGenerator
+		}
+
+		s.recordManifest(rec.Path, rec.TemplatePath, origin, meta, source)
+	}
+
+	return nil
+}
+
+// resolveGeneratorPrompts resolves prompt steps from args, filling defaults
+// where values are absent. Returns (failedPrompt, error) — failedPrompt is
+// the name of a required prompt that could not be resolved; if all prompts
+// resolve, both return values are empty.
+func (s *Scaffolder) resolveGeneratorPrompts(gen generators.Generator, args map[string]any, out map[string]any) (string, error) {
+	for _, step := range gen.Steps {
+		if step.Type != "prompt" {
+			continue
+		}
+		// Check args first.
+		if v, ok := args[step.Name]; ok {
+			out[step.Name] = v
+			continue
+		}
+		// Use default.
+		if step.Default != "" {
+			out[step.Name] = step.Default
+			continue
+		}
+		// Required with no value.
+		if step.Required {
+			return step.Name, nil
+		}
+		// Not required, no default → empty string.
+		out[step.Name] = ""
+	}
+	return "", nil
+}
+
+// buildContext returns a background context for generator execution.
+func (s *Scaffolder) buildContext() context.Context {
+	return context.Background()
+}
+
+// mapPromptResolver implements generators.PromptResolver using a
+// static map. The caller (GeneratePackGenerator) populates the map
+// with args + defaults before the executor runs, so the executor
+// sees resolved values instead of overwriting with defaults.
+type mapPromptResolver struct {
+	values    map[string]any
+	errorCode string
+}
+
+func (r *mapPromptResolver) Resolve(name, message, def string, required bool) (string, error) {
+	if v, ok := r.values[name]; ok {
+		switch val := v.(type) {
+		case string:
+			return val, nil
+		default:
+			return fmt.Sprint(val), nil
+		}
+	}
+	if def != "" {
+		return def, nil
+	}
+	if required {
+		return "", oops.
+			Code(r.errorCode).
+			Errorf("required prompt %q not provided and has no default", name)
+	}
+	return "", nil
 }
 
 // RoutesData is the template data for routes.tmpl.

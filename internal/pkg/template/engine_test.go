@@ -2,10 +2,13 @@ package template
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/samber/oops"
 )
 
 func TestEngine_Render(t *testing.T) {
@@ -150,6 +153,69 @@ func TestEngine_Lookup(t *testing.T) {
 	}
 }
 
+func TestEngine_RenderPackOnly(t *testing.T) {
+	// Create a temporary pack directory structure.
+	packDir := t.TempDir()
+	templateDir := filepath.Join(packDir, "templates", "common")
+	if err := os.MkdirAll(templateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	tmplContent := "module {{ .ModuleName }}\n// PACK TEMPLATE"
+	if err := os.WriteFile(filepath.Join(templateDir, "go.mod.tmpl"), []byte(tmplContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := NewEngine()
+
+	data := struct {
+		ModuleName string
+	}{
+		ModuleName: "github.com/test/packonly",
+	}
+
+	t.Run("pack template exists renders from pack", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := engine.RenderPackOnly(&buf, packDir, "common/go.mod.tmpl", data)
+		if err != nil {
+			t.Fatalf("RenderPackOnly failed: %v", err)
+		}
+		got := buf.String()
+		if !strings.Contains(got, "PACK TEMPLATE") {
+			t.Errorf("expected pack template content, got: %q", got)
+		}
+		if !strings.Contains(got, "github.com/test/packonly") {
+			t.Errorf("expected module name in output, got: %q", got)
+		}
+	})
+
+	t.Run("missing template returns generator_template_not_found", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := engine.RenderPackOnly(&buf, packDir, "nonexistent.tmpl", data)
+		if err == nil {
+			t.Fatal("expected error for missing template, got nil")
+		}
+		code := oopsCode(err)
+		if code != CodeGeneratorTemplateNotFound {
+			t.Errorf("error code = %q, want %q; error: %v", code, CodeGeneratorTemplateNotFound, err)
+		}
+	})
+
+	t.Run("embedded template NOT used as fallback", func(t *testing.T) {
+		// common/go.mod.tmpl exists in embedded FS. RenderPackOnly must
+		// NOT fall back to it when the pack doesn't have the template.
+		emptyPackDir := t.TempDir()
+		var buf bytes.Buffer
+		err := engine.RenderPackOnly(&buf, emptyPackDir, "common/go.mod.tmpl", data)
+		if err == nil {
+			t.Fatal("expected error when pack template is missing, but got nil (likely fell back to embedded)")
+		}
+		code := oopsCode(err)
+		if code != CodeGeneratorTemplateNotFound {
+			t.Errorf("error code = %q, want %q; error: %v", code, CodeGeneratorTemplateNotFound, err)
+		}
+	})
+}
+
 func TestEngine_RenderTo_Quiet(t *testing.T) {
 	engine := NewEngine()
 
@@ -207,4 +273,18 @@ func TestEngine_RenderTo_Quiet(t *testing.T) {
 		// Render should STILL print "Using custom template" to stdout
 		// (existing behavior preserved)
 	})
+}
+
+// oopsCode extracts the oops code from an error, or returns "" if not set.
+func oopsCode(err error) string {
+	var oErr oops.OopsError
+	if err == nil {
+		return ""
+	}
+	if errors.As(err, &oErr) {
+		if code, ok := oErr.Code().(string); ok {
+			return code
+		}
+	}
+	return ""
 }

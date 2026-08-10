@@ -18,6 +18,8 @@ const (
 	OriginComponent Origin = "component"
 	OriginCrud      Origin = "crud"
 	OriginBinary    Origin = "binary"
+	OriginGenerator Origin = "generator"
+	OriginTemplate  Origin = "template"
 )
 
 // ManifestEntry records one generated file's fingerprint and provenance.

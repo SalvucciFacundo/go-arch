@@ -42,10 +42,11 @@ type Config struct {
 
 // EnvContext provides lifecycle metadata for hook environment construction.
 type EnvContext struct {
-	ProjectName string // project_name from .go-arch.yaml
-	ProjectPath string // absolute project directory path
-	Arch        string // architecture value (Minimalist, Standard, Hexagonal)
-	HookType    Type   // the hook type currently firing (drives HOOK_TYPE env var)
-	PackName    string // pack name when scaffolding from a pack (drives PACK_NAME)
-	PackVersion string // pack version when scaffolding from a pack (drives PACK_VERSION)
+	ProjectName   string // project_name from .go-arch.yaml
+	ProjectPath   string // absolute project directory path
+	Arch          string // architecture value (Minimalist, Standard, Hexagonal)
+	HookType      Type   // the hook type currently firing (drives HOOK_TYPE env var)
+	PackName      string // pack name when scaffolding from a pack (drives PACK_NAME)
+	PackVersion   string // pack version when scaffolding from a pack (drives PACK_VERSION)
+	GeneratorName string // generator name when executing a generator recipe (drives GENERATOR_NAME)
 }
