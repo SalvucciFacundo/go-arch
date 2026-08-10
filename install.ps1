@@ -1,7 +1,7 @@
-# go-arch-cli installer — single-command install for Windows.
+# go-arch installer — single-command install for Windows.
 #
 # Usage (PowerShell):
-#   irm https://raw.githubusercontent.com/SalvucciFacundo/go-arch-cli/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/SalvucciFacundo/go-arch/main/install.ps1 | iex
 #
 # Behavior:
 #   1. Detect architecture (amd64/arm64).
@@ -13,7 +13,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$Repo = 'SalvucciFacundo/go-arch-cli'
+$Repo = 'SalvucciFacundo/go-arch'
 $BaseUrl = "https://github.com/$Repo/releases/download"
 
 function Write-Step([string]$Message) {

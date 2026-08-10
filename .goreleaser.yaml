@@ -48,7 +48,7 @@ nfpms:
 aurs:
   - name: go-arch-bin
     description: "GO CLI for project scaffolding with Clean Architecture"
-    homepage: "https://github.com/SalvucciFacundo/go-arch-cli"
+    homepage: "https://github.com/SalvucciFacundo/go-arch"
     maintainers:
       - "SalvucciFacundo <facundo@example.com>"
     license: "MIT"

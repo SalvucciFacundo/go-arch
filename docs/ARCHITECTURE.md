@@ -1,6 +1,6 @@
 # Project Architecture & Layouts 🏛️
 
-This document provides a deep dive into the architectural principles and folder structures supported by **Go-Architect CLI**. It also explains how the internal "External Templates" engine works.
+This document provides a deep dive into the architectural principles and folder structures supported by **Go-Arch**. It also explains how the internal "External Templates" engine works.
 
 ---
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# go-arch-cli installer — single-command install for Linux and macOS.
+# go-arch installer — single-command install for Linux and macOS.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/SalvucciFacundo/go-arch-cli/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/SalvucciFacundo/go-arch/main/install.sh | bash
 #
 # Behavior:
 #   1. Detect OS (linux/darwin) and architecture (amd64/arm64).
@@ -17,7 +17,7 @@
 # No build tools are required. The binary is installed as-is.
 set -euo pipefail
 
-REPO="SalvucciFacundo/go-arch-cli"
+REPO="SalvucciFacundo/go-arch"
 BASE_URL="https://github.com/${REPO}/releases/download"
 
 say() { printf '\033[1;34mgo-arch:\033[0m %s\n' "$*"; }

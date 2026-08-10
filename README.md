@@ -1,19 +1,19 @@
 <p align="center">
-  <img src="./docs/img/banner.png" alt="Go-Arch CLI Banner" width="100%">
+  <img src="./docs/img/banner.png" alt="Go-Arch Banner" width="100%">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/v/release/SalvucciFacundo/go-arch-cli?style=for-the-badge&color=00ADD8" alt="Release">
-  <img src="https://img.shields.io/github/license/SalvucciFacundo/go-arch-cli?style=for-the-badge&color=00ADD8" alt="License">
-  <img src="https://img.shields.io/github/go-mod/go-version/SalvucciFacundo/go-arch-cli?style=for-the-badge&color=00ADD8" alt="Go Version">
+  <img src="https://img.shields.io/github/v/release/SalvucciFacundo/go-arch?style=for-the-badge&color=00ADD8" alt="Release">
+  <img src="https://img.shields.io/github/license/SalvucciFacundo/go-arch?style=for-the-badge&color=00ADD8" alt="License">
+  <img src="https://img.shields.io/github/go-mod/go-version/SalvucciFacundo/go-arch?style=for-the-badge&color=00ADD8" alt="Go Version">
   <img src="https://img.shields.io/badge/OS-Linux%20|%20macOS%20|%20Windows-00ADD8?style=for-the-badge" alt="OS Support">
 </p>
 
 ---
 
-# Go-Architect CLI (go-arch) 🚀
+# Go-Arch (go-arch) 🚀
 
-**Go-Architect CLI** is a professional, agnostic, and multi-platform scaffolding tool designed to standardize Go project initialization. Inspired by the performance and modularity of the Angular CLI, it empowers developers to bootstrap production-ready applications with clean architecture patterns in seconds.
+**Go-Arch** is a professional, agnostic, and multi-platform framework for scaffolding and evolving Go projects — a CLI, an ecosystem of installable template **packs**, executable **generators**, and **multi-project workspaces**. Inspired by the performance and modularity of the Angular CLI, it empowers developers to bootstrap production-ready applications with clean architecture patterns in seconds — and to extend the scaffolder itself.
 
 ## ✨ Key Features
 
@@ -23,9 +23,14 @@
 - 🛠️ **Component Generators**: Scaffold Services, Repositories, Handlers, CRUD, and more mapped to your layout.
 - 🌐 **Server-Rendered Frontend**: Optional **templ + HTMX** frontend living in the same binary — no SPA, no Node.
 - 🧩 **Frontend Generators**: `generate page` and `generate component` for templ views with HTMX attributes.
+- 📦 **Installable Packs**: `template install github.com/you/go-arch-express` — publishable, versioned template packs with a formal contract, fetched via the Go module proxy.
+- ⚙️ **Generator Recipes**: Packs can ship executable `generate` logic (YAML recipes) — Angular-schematics-style extension.
+- 🔄 **Lifecycle Hooks**: `pre-new` / `post-new` / `pre-generate` / `post-generate` so generated projects run their own tooling (format, install deps, init git).
+- 🗂️ **Multi-Project Workspaces**: `go-arch.workspace.yaml` + `workspace upgrade`/`check` and `--service` to operate across a monorepo.
+- ⬆️ **Project Evolution**: `go-arch upgrade` propagates template changes via a fingerprint manifest without clobbering user edits.
 - 🐚 **Infrastructure Ready**: Optional **Docker** & **Docker Compose** generation for the app and DB.
 - 🧪 **QA & TDD Oriented**: Automatic test file generation with manual mocking patterns.
-- 🎨 **Deep Customization**: High-level template system (Global/Local) to override any generated code.
+- 🎨 **Deep Customization**: High-level template system (Global/Local/Pack) to override any generated code.
 - 🧠 **Smart Pluralization**: Linguistically aware generation (e.g., `Category` -> `Categories`).
 - 🛡️ **Living Architecture**: Built-in validation to ensure project integrity over time.
 - 🔭 **Multi-Backend Observability**: Built-in OpenTelemetry support for **Jaeger**, **Zipkin**, **Prometheus**, and **SigNoz**.
@@ -41,18 +46,18 @@ Install the latest release binary with one command — no build tools required.
 
 **Linux / macOS:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SalvucciFacundo/go-arch-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SalvucciFacundo/go-arch/main/install.sh | bash
 ```
 Installs to `/usr/local/bin` (or `~/.local/bin` when you don't have write permission, with PATH guidance). Verifies the SHA-256 checksum before installing.
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/SalvucciFacundo/go-arch-cli/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/SalvucciFacundo/go-arch/main/install.ps1 | iex
 ```
 Installs to `~\.go-arch\bin` and adds it to your user PATH.
 
 ### 📦 Binary Downloads
-Download the latest pre-compiled binaries from the [Releases](https://github.com/SalvucciFacundo/go-arch-cli/releases) page.
+Download the latest pre-compiled binaries from the [Releases](https://github.com/SalvucciFacundo/go-arch/releases) page.
 
 ### 🐧 Linux (Native Packages)
 | Distribution | Install Command |
@@ -63,13 +68,13 @@ Download the latest pre-compiled binaries from the [Releases](https://github.com
 | **Alpine** | `apk add --allow-untrusted go-arch_*.apk` |
 
 ### 🍏 macOS / 🪟 Windows
-1. Download the latest version from [Releases](https://github.com/SalvucciFacundo/go-arch-cli/releases).
+1. Download the latest version from [Releases](https://github.com/SalvucciFacundo/go-arch/releases).
 2. **macOS**: Move the binary to `/usr/local/bin/go-arch`.
 3. **Windows**: Add the folder containing `go-arch.exe` to your system `PATH`.
 
 ### 🛠️ Manual Build (Any OS)
 ```bash
-go install github.com/SalvucciFacundo/go-arch-cli@latest
+go install github.com/SalvucciFacundo/go-arch@latest
 ```
 
 ## 📐 Usage Guide

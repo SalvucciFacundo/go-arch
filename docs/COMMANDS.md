@@ -1,6 +1,6 @@
 # Command Reference Guide 📖
 
-This guide provides a detailed technical explanation of every command available in **Go-Architect CLI**.
+This guide provides a detailed technical explanation of every command available in **Go-Arch**.
 
 ---
 
