@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"go-arch/internal/pkg/generators"
 	"go-arch/internal/pkg/hooks"
 	"go-arch/internal/pkg/packs"
 	"go-arch/internal/pkg/scaffold"
@@ -170,33 +171,49 @@ func handleRequest(req *Request) {
 						"required": []string{"projectName", "moduleName"},
 					},
 				},
-				map[string]interface{}{
-					"name":        "generate_component",
-					"description": "Generate standard components (service, repository, handler, crud, page, or component) for the project.",
-					"inputSchema": map[string]interface{}{
-						"type": "object",
-						"properties": map[string]interface{}{
-							"type": map[string]interface{}{
-								"type":        "string",
-								"enum":        []string{"service", "repository", "handler", "crud", "page", "component"},
-								"description": "Type of the component to generate",
-							},
-							"name": map[string]interface{}{
-								"type":        "string",
-								"description": "Name of the entity or component (e.g. User, Product)",
-							},
-							"projectPath": map[string]interface{}{
-								"type":        "string",
-								"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
-							},
-							"route": map[string]interface{}{
-								"type":        "string",
-								"description": "Route pattern for handler type (e.g. 'GET /stats'). Ignored for other types.",
-							},
+			map[string]interface{}{
+				"name":        "list_generators",
+				"description": "List available generators for the current project: pack generators (if installed), builtin generators, and component types.",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"projectPath": map[string]interface{}{
+							"type":        "string",
+							"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
 						},
-						"required": []string{"type", "name"},
 					},
 				},
+			},
+			map[string]interface{}{
+				"name":        "generate_component",
+				"description": "Generate components using pack generators, builtin generators, or standard component types (service, repository, handler, crud, page, component) for the project.",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"type": map[string]interface{}{
+							"type":        "string",
+							"description": "Type of the component to generate or generator name (pack/builtin/component type)",
+						},
+						"name": map[string]interface{}{
+							"type":        "string",
+							"description": "Name of the entity or component (e.g. User, Product)",
+						},
+						"projectPath": map[string]interface{}{
+							"type":        "string",
+							"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
+						},
+						"route": map[string]interface{}{
+							"type":        "string",
+							"description": "Route pattern for handler type (e.g. 'GET /stats'). Ignored for other types.",
+						},
+						"generatorArgs": map[string]interface{}{
+							"type":        "object",
+							"description": "Optional: Arguments for pack generator prompt resolution (e.g. {\"port\": \"3000\"})",
+						},
+					},
+					"required": []string{"type", "name"},
+				},
+			},
 				map[string]interface{}{
 					"name":        "check_architecture",
 					"description": "Run architectural rules checks, validating import rules and package directory structures.",
@@ -394,10 +411,11 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 
 	case "generate_component":
 		var args struct {
-			Type        string `json:"type"`
-			Name        string `json:"name"`
-			ProjectPath string `json:"projectPath"`
-			Route       string `json:"route"`
+			Type          string                 `json:"type"`
+			Name          string                 `json:"name"`
+			ProjectPath   string                 `json:"projectPath"`
+			Route         string                 `json:"route"`
+			GeneratorArgs map[string]interface{} `json:"generatorArgs"`
 		}
 		if err := json.Unmarshal(arguments, &args); err != nil {
 			sendError(id, -32602, "Invalid tool arguments", err.Error())
@@ -438,6 +456,59 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			return
 		}
 		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
+
+		// --- Three-tier dispatch ---
+		// Tier 1: pack generators (if project has a template).
+		templateName := viper.GetString("template")
+		if templateName != "" {
+			packName, packVersion, parseErr := packs.ParseRef(templateName)
+			if parseErr == nil {
+				if packVersion == "" {
+					latest, lErr := packs.LatestInstalled(packName)
+					if lErr == nil {
+						packVersion = latest
+					}
+				}
+				if packVersion != "" {
+					packDir := packs.Path(packName, packVersion)
+					packManifest, mErr := packs.Load(packDir)
+					if mErr == nil {
+						if _, ok := packManifest.Generators[args.Type]; ok {
+							cfg.Template = packName
+							pi := packs.PackInfo{Dir: packDir, Manifest: packManifest}
+
+							// Convert generatorArgs to map[string]any.
+							genArgs := make(map[string]any)
+							for k, v := range args.GeneratorArgs {
+								genArgs[k] = v
+							}
+
+							scaffolder := scaffold.NewScaffolder(cfg,
+								scaffold.WithRunner(runner),
+								scaffold.WithPackInfo(pi),
+							)
+							if genErr := scaffolder.GeneratePackGenerator(args.Type, genArgs); genErr != nil {
+								sendToolResult(id, fmt.Sprintf("Error executing pack generator: %v", genErr), true)
+								return
+							}
+							sendToolResult(id, fmt.Sprintf("Generator '%s' (%s) from pack '%s' completed.", args.Name, args.Type, packName), false)
+							return
+						}
+					}
+				}
+			}
+		}
+
+		// Tier 2 & 3: component types.
+		knownTypes := map[string]bool{
+			"service": true, "repository": true, "handler": true,
+			"crud": true, "page": true, "component": true,
+		}
+		if !knownTypes[args.Type] {
+			sendToolResult(id, fmt.Sprintf("Unknown generator %q: use --list to see available generators", args.Type), true)
+			return
+		}
+
 		scaffolder := scaffold.NewScaffolder(cfg, scaffold.WithRunner(runner))
 		var err error
 		if args.Type == "crud" {
@@ -455,6 +526,92 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 			return
 		}
 		sendToolResult(id, fmt.Sprintf("Successfully generated %s component: %s", args.Type, args.Name), false)
+
+	case "list_generators":
+		var args struct {
+			ProjectPath string `json:"projectPath"`
+		}
+		if err := json.Unmarshal(arguments, &args); err != nil {
+			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+
+		if args.ProjectPath != "" {
+			oldWd, err := os.Getwd()
+			if err == nil {
+				if chdirErr := os.Chdir(args.ProjectPath); chdirErr != nil {
+					sendError(id, -32602, "Cannot change to project directory", chdirErr.Error())
+					return
+				}
+				defer func() { _ = os.Chdir(oldWd) }()
+			}
+		}
+
+		viper.Reset()
+		viper.AddConfigPath(".")
+		viper.SetConfigName(".go-arch")
+		_ = viper.ReadInConfig() // best-effort; missing config handled per section
+
+		// Build the response: component types + pack generators (if installed) +
+		// builtin generators.
+		type GeneratorInfo struct {
+			Name        string `json:"name"`
+			Source      string `json:"source"`
+			Description string `json:"description,omitempty"`
+		}
+		var genList []GeneratorInfo
+
+		// Component types (always available).
+		for _, t := range []string{"service", "repository", "handler", "crud", "page", "component"} {
+			genList = append(genList, GeneratorInfo{
+				Name:   t,
+				Source: "builtin-component",
+			})
+		}
+
+		// Pack generators.
+		templateName := viper.GetString("template")
+		if templateName != "" {
+			packName, packVersion, parseErr := packs.ParseRef(templateName)
+			if parseErr == nil {
+				if packVersion == "" {
+					latest, lErr := packs.LatestInstalled(packName)
+					if lErr == nil {
+						packVersion = latest
+					}
+					if packVersion == "" {
+						goto builtins
+					}
+				}
+				packDir := packs.Path(packName, packVersion)
+				packManifest, mErr := packs.Load(packDir)
+				if mErr == nil {
+					for name, gen := range packManifest.Generators {
+						genList = append(genList, GeneratorInfo{
+							Name:        name,
+							Source:      fmt.Sprintf("pack:%s", packName),
+							Description: gen.Description,
+						})
+					}
+				}
+			}
+		}
+
+	builtins:
+		// Builtin generators.
+		if len(generators.BuiltinRegistry) > 0 {
+			for name := range generators.BuiltinRegistry {
+				genList = append(genList, GeneratorInfo{
+					Name:   name,
+					Source: "builtin",
+				})
+			}
+		}
+
+		result, _ := json.MarshalIndent(map[string]interface{}{
+			"generators": genList,
+		}, "", "  ")
+		sendToolResult(id, string(result), false)
 
 	case "check_architecture":
 		var args struct {

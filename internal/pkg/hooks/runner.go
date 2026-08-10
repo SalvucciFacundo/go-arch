@@ -72,6 +72,12 @@ func NewRunner(cfg *Config, cmd CommandRunner, out io.Writer) *Runner {
 	return &Runner{cfg: cfg, cmd: cmd, out: out}
 }
 
+// CommandRunner returns the underlying process executor so callers
+// (e.g. scaffold) can build a generators.Runner for run: steps.
+func (r *Runner) CommandRunner() CommandRunner {
+	return r.cmd
+}
+
 const defaultHookTimeout = 30 * time.Second
 
 // Fire runs every hook entry registered for t in order.
