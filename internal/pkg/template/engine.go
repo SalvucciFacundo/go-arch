@@ -13,7 +13,13 @@ import (
 	"go-arch/internal/ui"
 
 	"github.com/jinzhu/inflection"
+	"github.com/samber/oops"
 )
+
+// CodeGeneratorTemplateNotFound is returned when RenderPackOnly cannot find a
+// template inside the pack's templates/ directory. Defined in the template
+// package (not generators) to avoid import cycles: generators → template.
+const CodeGeneratorTemplateNotFound = "generator_template_not_found"
 
 // Templates is the embedded FS containing all templates.
 //
@@ -181,6 +187,42 @@ func (e *Engine) ResolveBinary(path string) (ResolvedSource, error) {
 			return e.fs.ReadFile(filepath.Join("templates", path))
 		},
 	}, nil
+}
+
+// RenderPackOnly renders a template sourced exclusively from the pack's
+// templates/ directory. Unlike RenderTo, it does NOT fall back to local,
+// global, or embedded chains — the pack template is the only valid source.
+//
+// Returns an error with code CodeGeneratorTemplateNotFound when the
+// template does not exist in the pack's templates/ directory.
+func (e *Engine) RenderPackOnly(wr io.Writer, packDir, from string, data interface{}) error {
+	tmplPath := filepath.Join(packDir, "templates", from)
+
+	info, err := os.Stat(tmplPath)
+	if os.IsNotExist(err) {
+		return oops.
+			Code(CodeGeneratorTemplateNotFound).
+			Errorf("generator template not found: %q (in pack templates/)", from)
+	}
+	if err != nil {
+		return oops.
+			Code(CodeGeneratorTemplateNotFound).
+			Wrapf(err, "cannot access template %q", from)
+	}
+	if info.IsDir() {
+		return oops.
+			Code(CodeGeneratorTemplateNotFound).
+			Errorf("template path %q is a directory", from)
+	}
+
+	tmpl := template.New(filepath.Base(from)).Funcs(e.getFuncMap())
+	parsed, err := tmpl.ParseFiles(tmplPath)
+	if err != nil {
+		return oops.
+			Code(CodeGeneratorTemplateNotFound).
+			Wrapf(err, "failed to parse template %q", from)
+	}
+	return parsed.Execute(wr, data)
 }
 
 func (e *Engine) getFuncMap() template.FuncMap {
