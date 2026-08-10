@@ -92,6 +92,15 @@ Validates that the project structure and imports follow the selected layout rule
 go-arch check
 ```
 
+### 3b. Multi-Project Workspaces
+Operate across multiple services in a monorepo via a `go-arch.workspace.yaml`.
+```bash
+go-arch workspace upgrade
+go-arch workspace check
+go-arch generate crud User --service orders
+```
+See [Workspaces](./docs/workspaces.md).
+
 ### 4. Smart Generators
 Generates patterns based on your project metadata (detects layout and namespace).
 ```bash
