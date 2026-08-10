@@ -164,6 +164,8 @@ Every CLI command has a corresponding MCP tool for agents:
 | `go-arch generate` | `generate_component` | Generate service/repository/handler/crud/page/component, or run pack generators with `generatorArgs` |
 | `go-arch generate --list` | `list_generators` | List available generators (pack, builtin, component types) for the current project |
 | `go-arch check` | `check_architecture` | Validate the project structure and import rules |
+| `go-arch template install` | `install_template` | Install a template pack from a Go module. `allowHooks: true` enables hooks/generators that run commands (default: disabled — safe) |
+| `go-arch template list` | `list_packs` | List installed template packs with versions |
 | `go-arch serve` | `serve_project` | Return the exact run command (`air` or `go run <mainPath>`) — agents never start a long-running server over MCP |
 | `go-arch setup` | `setup_environment` | Detect Go/air presence; with `install: true` installs only `air` (user-level, no sudo). The Go toolchain itself is never installed by the tool |
 
