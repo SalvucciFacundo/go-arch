@@ -102,6 +102,7 @@ Flags:
 
 		// Tier 1: pack generators (if project has a template).
 		templateName := viper.GetString("template")
+		packResolved := false
 		if templateName != "" {
 			packName, packVersion, parseErr := packs.ParseRef(templateName)
 			if parseErr == nil {
@@ -115,6 +116,7 @@ Flags:
 					packDir := packs.Path(packName, packVersion)
 					packManifest, mErr := packs.Load(packDir)
 					if mErr == nil {
+						packResolved = true
 						if _, ok := packManifest.Generators[compType]; ok {
 							config.Template = packName
 							pi := packs.PackInfo{Dir: packDir, Manifest: packManifest}
@@ -141,9 +143,9 @@ Flags:
 		}
 
 		// Tier 3: component types. If a template was declared but the pack
-		// wasn't installed, and the type is not a known component type,
-		// emit pack_not_installed.
-		if templateName != "" && !isKnownComponentType(compType) {
+		// was NOT successfully resolved, and the type is not a known
+		// component type, emit pack_not_installed.
+		if templateName != "" && !packResolved && !isKnownComponentType(compType) {
 			return oops.
 				Code(generators.CodePackNotInstalled).
 				With("pack", templateName).
