@@ -346,3 +346,126 @@ architecture: Standard
 		}
 	}
 }
+
+// --------------- Pack Installed + Unknown Generator Tests ---------------
+
+// TestGenerate_PackInstalled_UnknownGenerator_GroupedListing verifies that
+// when the project declares a template pack that IS installed, but the
+// requested generator does NOT exist in that pack, the error is
+// unknown_generator (NOT pack_not_installed) and the grouped listing
+// INCLUDES the pack's available generators.
+// REQ-10 S1 / REQ-22 S3 regression guard.
+func TestGenerate_PackInstalled_UnknownGenerator_GroupedListing(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gen-pkg-unknown-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Create a fixture v2 pack with generators "docker" and "service".
+	packDir := filepath.Join(tmpDir, "testpack@1.0.0")
+	if err := os.MkdirAll(packDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestYAML := `contract_version: 2
+name: testpack
+version: 1.0.0
+generators:
+  docker:
+    description: "Generate Docker config"
+    steps:
+      - type: template
+        from: "Dockerfile.tmpl"
+        to: "Dockerfile"
+  service:
+    description: "Generate a service"
+    steps:
+      - type: template
+        from: "handler.tmpl"
+        to: "internal/handler/x.go"
+`
+	if err := os.WriteFile(filepath.Join(packDir, "go-arch.yaml"), []byte(manifestYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create template files so Load succeeds.
+	tmplDir := filepath.Join(packDir, "templates")
+	if err := os.MkdirAll(tmplDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, filepath.Join(tmplDir, "Dockerfile.tmpl"), "FROM golang:1.24")
+	mustWriteFile(t, filepath.Join(tmplDir, "handler.tmpl"), "package handler")
+
+	// Point GO_ARCH_PACKS_DIR to our temp dir so packs.Path / LatestInstalled works.
+	t.Setenv("GO_ARCH_PACKS_DIR", tmpDir)
+
+	// Write .go-arch.yaml with template referencing the installed pack.
+	configYAML := `project_name: "TestPackUK"
+module_name: github.com/test/packuk
+architecture: Standard
+template: testpack@1.0.0
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".go-arch.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create .go-arch directory so manifest operations don't fail.
+	archDir := filepath.Join(tmpDir, ".go-arch")
+	if err := os.MkdirAll(archDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(archDir, "manifest.yaml"),
+		[]byte("version: 1\nfiles: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reset the list flag for clean state.
+	_ = generateCmd.Flags().Set("list", "false")
+
+	buf := new(bytes.Buffer)
+	RootCmd.SetOut(buf)
+	RootCmd.SetErr(buf)
+	RootCmd.SetArgs([]string{"generate", "bogus", "Whatever"})
+
+	err = RootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for unknown generator when pack is installed")
+	}
+
+	errMsg := err.Error() + "\n" + buf.String()
+
+	// Must NOT claim the pack is not installed.
+	if strings.Contains(errMsg, "not installed") {
+		t.Errorf("error should NOT claim pack is not installed (pack IS installed). Got: %s", errMsg)
+	}
+
+	// Must contain unknown_generator.
+	if !strings.Contains(errMsg, "unknown_generator") && !strings.Contains(errMsg, "unknown generator") {
+		t.Errorf("error should contain unknown_generator, got: %s", errMsg)
+	}
+
+	// Must list the pack's available generators.
+	if !strings.Contains(errMsg, "docker") {
+		t.Errorf("error should list pack generator 'docker', got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "service") {
+		t.Errorf("error should list pack generator 'service', got: %s", errMsg)
+	}
+
+	// Must list component types.
+	if !strings.Contains(errMsg, "component types:") {
+		t.Errorf("error should list component types, got: %s", errMsg)
+	}
+}
+
+// mustWriteFile writes a file or fails the test.
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+}

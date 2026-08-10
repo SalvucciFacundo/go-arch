@@ -413,8 +413,8 @@ func TestRun_PreFlightPromptUnresolvable(t *testing.T) {
 		t.Error("template file must NOT exist after pre-flight prompt failure")
 	}
 	code := oopsCode(err)
-	if code != CodeGeneratorPromptUnresolvable && code != CodeMissingGeneratorArgument {
-		t.Errorf("error code = %q, want generator_prompt_unresolvable or missing_generator_argument", code)
+	if code != CodeGeneratorPromptUnresolvable {
+		t.Errorf("error code = %q, want generator_prompt_unresolvable (executor uses PromptResolver path)", code)
 	}
 }
 
