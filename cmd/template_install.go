@@ -59,7 +59,7 @@ If the pack declares hooks, a trust prompt is shown before installation.`,
 // a Confirm helper.
 func trustPrompt(packName string) (bool, error) {
 	ui.Warning(fmt.Sprintf(
-		"⚠ Pack %q declares hooks that will run with your shell. Review before enabling.",
+		"⚠ Pack %q declares hooks or generators that may run shell commands. Review before enabling.",
 		packName,
 	))
 	var answer bool

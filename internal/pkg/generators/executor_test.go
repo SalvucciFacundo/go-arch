@@ -413,8 +413,8 @@ func TestRun_PreFlightPromptUnresolvable(t *testing.T) {
 		t.Error("template file must NOT exist after pre-flight prompt failure")
 	}
 	code := oopsCode(err)
-	if code != CodeGeneratorPromptUnresolvable && code != CodeMissingGeneratorArgument {
-		t.Errorf("error code = %q, want generator_prompt_unresolvable or missing_generator_argument", code)
+	if code != CodeGeneratorPromptUnresolvable {
+		t.Errorf("error code = %q, want generator_prompt_unresolvable (executor uses PromptResolver path)", code)
 	}
 }
 
@@ -637,5 +637,60 @@ func TestRun_TemplateDataIsolation(t *testing.T) {
 	// db=mysql must NOT appear in template output (prompt values don't leak).
 	if strings.Contains(got, "mysql") {
 		t.Error("prompt value 'mysql' leaked into template output — data isolation broken")
+	}
+}
+
+func TestRun_HooksEnabledFalse_SkipsPrePostHooks(t *testing.T) {
+	// When HooksEnabled is false and the recipe has pre/post hooks,
+	// a single warning must be emitted naming the generator and pack.
+	packDir := setupPackDir(t)
+	projectRoot := t.TempDir()
+	ctx := context.Background()
+	firer := &fakeFirer{}
+
+	gen := Generator{
+		Pre: []hooks.Entry{
+			{Command: "echo", Args: []string{"pre"}},
+		},
+		Post: []hooks.Entry{
+			{Command: "echo", Args: []string{"post"}},
+		},
+		Steps: []Step{
+			{Type: "template", From: "common/handler.tmpl", To: "internal/h.go", Index: 0},
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := RunOptions{
+		ProjectRoot:   projectRoot,
+		PackDir:       packDir,
+		PackName:      "test-pack",
+		PackVersion:   "1.0.0",
+		HooksEnabled:  false,
+		Out:           &buf,
+		Firer:         firer,
+		GeneratorName: "docker",
+	}
+
+	_, err := Run(ctx, gen, opts)
+	if err != nil {
+		t.Fatalf("Run() with HooksEnabled=false and pre/post hooks: %v", err)
+	}
+
+	// Firer must NOT have been called (hooks skipped).
+	if firer.called != 0 {
+		t.Errorf("firer called %d times, want 0 (hooks skipped)", firer.called)
+	}
+
+	// Warning must be emitted.
+	output := buf.String()
+	if !strings.Contains(output, "generator_run_skipped_trust") {
+		t.Errorf("expected 'generator_run_skipped_trust' warning, got: %q", output)
+	}
+	if !strings.Contains(output, "docker") {
+		t.Errorf("warning should name generator 'docker', got: %q", output)
+	}
+	if !strings.Contains(output, "test-pack") {
+		t.Errorf("warning should name pack 'test-pack', got: %q", output)
 	}
 }

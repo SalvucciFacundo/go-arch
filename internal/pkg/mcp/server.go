@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go-arch/internal/pkg/generators"
 	"go-arch/internal/pkg/hooks"
@@ -15,7 +16,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 
+	"github.com/samber/oops"
 	"github.com/spf13/viper"
 )
 
@@ -171,49 +175,49 @@ func handleRequest(req *Request) {
 						"required": []string{"projectName", "moduleName"},
 					},
 				},
-			map[string]interface{}{
-				"name":        "list_generators",
-				"description": "List available generators for the current project: pack generators (if installed), builtin generators, and component types.",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"projectPath": map[string]interface{}{
-							"type":        "string",
-							"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
+				map[string]interface{}{
+					"name":        "list_generators",
+					"description": "List available generators for the current project: pack generators (if installed), builtin generators, and component types.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"projectPath": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
+							},
 						},
 					},
 				},
-			},
-			map[string]interface{}{
-				"name":        "generate_component",
-				"description": "Generate components using pack generators, builtin generators, or standard component types (service, repository, handler, crud, page, component) for the project.",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"type": map[string]interface{}{
-							"type":        "string",
-							"description": "Type of the component to generate or generator name (pack/builtin/component type)",
+				map[string]interface{}{
+					"name":        "generate_component",
+					"description": "Generate components using pack generators, builtin generators, or standard component types (service, repository, handler, crud, page, component) for the project.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"type": map[string]interface{}{
+								"type":        "string",
+								"description": "Type of the component to generate or generator name (pack/builtin/component type)",
+							},
+							"name": map[string]interface{}{
+								"type":        "string",
+								"description": "Name of the entity or component (e.g. User, Product)",
+							},
+							"projectPath": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
+							},
+							"route": map[string]interface{}{
+								"type":        "string",
+								"description": "Route pattern for handler type (e.g. 'GET /stats'). Ignored for other types.",
+							},
+							"generatorArgs": map[string]interface{}{
+								"type":        "object",
+								"description": "Optional: Arguments for pack generator prompt resolution (e.g. {\"port\": \"3000\"})",
+							},
 						},
-						"name": map[string]interface{}{
-							"type":        "string",
-							"description": "Name of the entity or component (e.g. User, Product)",
-						},
-						"projectPath": map[string]interface{}{
-							"type":        "string",
-							"description": "Optional: Path to the project root containing .go-arch.yaml if not running in the current directory",
-						},
-						"route": map[string]interface{}{
-							"type":        "string",
-							"description": "Route pattern for handler type (e.g. 'GET /stats'). Ignored for other types.",
-						},
-						"generatorArgs": map[string]interface{}{
-							"type":        "object",
-							"description": "Optional: Arguments for pack generator prompt resolution (e.g. {\"port\": \"3000\"})",
-						},
+						"required": []string{"type", "name"},
 					},
-					"required": []string{"type", "name"},
 				},
-			},
 				map[string]interface{}{
 					"name":        "check_architecture",
 					"description": "Run architectural rules checks, validating import rules and package directory structures.",
@@ -460,6 +464,7 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 		// --- Three-tier dispatch ---
 		// Tier 1: pack generators (if project has a template).
 		templateName := viper.GetString("template")
+		packResolved := false
 		if templateName != "" {
 			packName, packVersion, parseErr := packs.ParseRef(templateName)
 			if parseErr == nil {
@@ -473,6 +478,7 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 					packDir := packs.Path(packName, packVersion)
 					packManifest, mErr := packs.Load(packDir)
 					if mErr == nil {
+						packResolved = true
 						if _, ok := packManifest.Generators[args.Type]; ok {
 							cfg.Template = packName
 							pi := packs.PackInfo{Dir: packDir, Manifest: packManifest}
@@ -487,8 +493,10 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 								scaffold.WithRunner(runner),
 								scaffold.WithPackInfo(pi),
 							)
-							if genErr := scaffolder.GeneratePackGenerator(args.Type, genArgs); genErr != nil {
-								sendToolResult(id, fmt.Sprintf("Error executing pack generator: %v", genErr), true)
+							if genErr := scaffolder.GeneratePackGenerator(args.Type, genArgs,
+								scaffold.WithPromptErrorCode(generators.CodeMissingGeneratorArgument),
+							); genErr != nil {
+								sendToolResult(id, formatMCGeneratorError(genErr), true)
 								return
 							}
 							sendToolResult(id, fmt.Sprintf("Generator '%s' (%s) from pack '%s' completed.", args.Name, args.Type, packName), false)
@@ -500,12 +508,42 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 		}
 
 		// Tier 2 & 3: component types.
-		knownTypes := map[string]bool{
-			"service": true, "repository": true, "handler": true,
-			"crud": true, "page": true, "component": true,
+		// If template was set but the pack was NOT successfully resolved,
+		// and the type is not a known component type, emit pack_not_installed.
+		if templateName != "" && !packResolved && !isMCKnownComponentType(args.Type) {
+			sendToolResult(id, fmt.Sprintf(
+				"pack_not_installed: pack %q is not installed. Run 'go-arch template install' to install it.",
+				templateName,
+			), true)
+			return
 		}
-		if !knownTypes[args.Type] {
-			sendToolResult(id, fmt.Sprintf("Unknown generator %q: use --list to see available generators", args.Type), true)
+
+		if !isMCKnownComponentType(args.Type) {
+			msg := fmt.Sprintf("unknown_generator: unknown generator %q. Component types: service, repository, handler, crud, page, component.", args.Type)
+			// If a pack is installed, include its available generators.
+			if packResolved && templateName != "" {
+				packName, packVersion, _ := packs.ParseRef(templateName)
+				if packVersion == "" {
+					latest, _ := packs.LatestInstalled(packName)
+					if latest != "" {
+						packVersion = latest
+					}
+				}
+				if packVersion != "" {
+					packDir := packs.Path(packName, packVersion)
+					packManifest, mErr := packs.Load(packDir)
+					if mErr == nil && len(packManifest.Generators) > 0 {
+						names := make([]string, 0, len(packManifest.Generators))
+						for n := range packManifest.Generators {
+							names = append(names, n)
+						}
+						sort.Strings(names)
+						msg = fmt.Sprintf("unknown_generator: unknown generator %q. Pack generators (%s): %s. Component types: service, repository, handler, crud, page, component.",
+							args.Type, packName, strings.Join(names, ", "))
+					}
+				}
+			}
+			sendToolResult(id, msg, true)
 			return
 		}
 
@@ -861,4 +899,28 @@ func sendToolResult(id interface{}, text string, isError bool) {
 		},
 		IsError: isError,
 	})
+}
+
+// isMCKnownComponentType returns true if t is a built-in component type.
+func isMCKnownComponentType(t string) bool {
+	switch t {
+	case "service", "repository", "handler", "crud", "page", "component":
+		return true
+	}
+	return false
+}
+
+// formatMCGeneratorError formats a generator error for MCP tool results,
+// prepending the oops error code when available.
+func formatMCGeneratorError(err error) string {
+	if err == nil {
+		return "unknown generator error"
+	}
+	var oErr oops.OopsError
+	if errors.As(err, &oErr) {
+		if code, ok := oErr.Code().(string); ok && code != "" {
+			return fmt.Sprintf("%s: %v", code, err)
+		}
+	}
+	return fmt.Sprintf("Error executing pack generator: %v", err)
 }

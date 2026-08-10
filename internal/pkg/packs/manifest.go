@@ -132,6 +132,14 @@ func (m *Manifest) UnmarshalYAML(value *yaml.Node) error {
 					Code(CodeInvalidPackManifest).
 					Wrapf(err, "pack manifest: generators")
 			}
+			// Validate each generator recipe at load time.
+			for name, g := range m.Generators {
+				if err := generators.Validate(name, g); err != nil {
+					return oops.
+						Code(CodeInvalidPackManifest).
+						Wrapf(err, "pack manifest: generator %q", name)
+				}
+			}
 		}
 	}
 

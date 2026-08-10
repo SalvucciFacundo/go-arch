@@ -662,12 +662,33 @@ func isValidGoIdentifier(name string) bool {
 	return token.IsIdentifier(name)
 }
 
+// GeneratePackConfig holds optional configuration for GeneratePackGenerator.
+type GeneratePackConfig struct {
+	PromptErrorCode string
+}
+
+// GeneratePackOption configures optional behaviour for GeneratePackGenerator.
+type GeneratePackOption func(*GeneratePackConfig)
+
+// WithPromptErrorCode sets the oops error code used when a required prompt
+// cannot be resolved from args. MCP callers should use
+// CodeMissingGeneratorArgument; CLI non-interactive callers should use
+// CodeGeneratorPromptUnresolvable (the default).
+func WithPromptErrorCode(code string) GeneratePackOption {
+	return func(cfg *GeneratePackConfig) { cfg.PromptErrorCode = code }
+}
+
 // GeneratePackGenerator executes a named generator recipe from the
 // currently active pack (set via WithPackInfo). It performs pre-flight
 // prompt resolution from args, pre-flight sandbox validation, runs the
 // recipe via generators.Run, and records the resulting files in the
 // project manifest with generator provenance.
-func (s *Scaffolder) GeneratePackGenerator(name string, args map[string]any) error {
+func (s *Scaffolder) GeneratePackGenerator(name string, args map[string]any, opts ...GeneratePackOption) error {
+	cfg := &GeneratePackConfig{PromptErrorCode: generators.CodeGeneratorPromptUnresolvable}
+	for _, o := range opts {
+		o(cfg)
+	}
+
 	if s.packInfo == nil {
 		return oops.
 			Code(generators.CodePackNotInstalled).
@@ -701,14 +722,14 @@ func (s *Scaffolder) GeneratePackGenerator(name string, args map[string]any) err
 	}
 	if failedPrompt != "" {
 		return oops.
-			Code(generators.CodeMissingGeneratorArgument).
+			Code(cfg.PromptErrorCode).
 			Errorf("required prompt %q not provided for generator %q", failedPrompt, name)
 	}
 
 	// Provide a PromptResolver to the executor so it doesn't overwrite
 	// our resolved values with defaults. It reads from the resolvedArgs
 	// that we already populated with args + defaults.
-	promptResolver := &mapPromptResolver{values: resolvedArgs}
+	promptResolver := &mapPromptResolver{values: resolvedArgs, errorCode: cfg.PromptErrorCode}
 
 	// --- Pre-flight: sandbox validation ---
 	projectRoot, err := os.Getwd()
@@ -740,7 +761,7 @@ func (s *Scaffolder) GeneratePackGenerator(name string, args map[string]any) err
 		firer = genRunner
 	}
 
-	opts := generators.RunOptions{
+	runOpts := generators.RunOptions{
 		ProjectRoot:    projectRoot,
 		PackDir:        s.packInfo.Dir,
 		PackName:       s.packInfo.Manifest.Name,
@@ -756,11 +777,11 @@ func (s *Scaffolder) GeneratePackGenerator(name string, args map[string]any) err
 	}
 
 	if s.runner != nil {
-		opts.CmdRunner = s.runner.CommandRunner()
+		runOpts.CmdRunner = s.runner.CommandRunner()
 	}
 
 	ctx := s.buildContext()
-	records, runErr := generators.Run(ctx, gen, opts)
+	records, runErr := generators.Run(ctx, gen, runOpts)
 	if runErr != nil {
 		return runErr
 	}
@@ -841,7 +862,8 @@ func (s *Scaffolder) buildContext() context.Context {
 // with args + defaults before the executor runs, so the executor
 // sees resolved values instead of overwriting with defaults.
 type mapPromptResolver struct {
-	values map[string]any
+	values    map[string]any
+	errorCode string
 }
 
 func (r *mapPromptResolver) Resolve(name, message, def string, required bool) (string, error) {
@@ -858,7 +880,7 @@ func (r *mapPromptResolver) Resolve(name, message, def string, required bool) (s
 	}
 	if required {
 		return "", oops.
-			Code(generators.CodeMissingGeneratorArgument).
+			Code(r.errorCode).
 			Errorf("required prompt %q not provided and has no default", name)
 	}
 	return "", nil

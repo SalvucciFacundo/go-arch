@@ -8,6 +8,7 @@ import (
 	"go-arch/internal/pkg/scaffold"
 	"go-arch/internal/ui"
 	"sort"
+	"strings"
 
 	"github.com/samber/oops"
 	"github.com/spf13/cobra"
@@ -101,6 +102,7 @@ Flags:
 
 		// Tier 1: pack generators (if project has a template).
 		templateName := viper.GetString("template")
+		packResolved := false
 		if templateName != "" {
 			packName, packVersion, parseErr := packs.ParseRef(templateName)
 			if parseErr == nil {
@@ -114,6 +116,7 @@ Flags:
 					packDir := packs.Path(packName, packVersion)
 					packManifest, mErr := packs.Load(packDir)
 					if mErr == nil {
+						packResolved = true
 						if _, ok := packManifest.Generators[compType]; ok {
 							config.Template = packName
 							pi := packs.PackInfo{Dir: packDir, Manifest: packManifest}
@@ -139,7 +142,17 @@ Flags:
 			}
 		}
 
-		// Tier 3: component types.
+		// Tier 3: component types. If a template was declared but the pack
+		// was NOT successfully resolved, and the type is not a known
+		// component type, emit pack_not_installed.
+		if templateName != "" && !packResolved && !isKnownComponentType(compType) {
+			return oops.
+				Code(generators.CodePackNotInstalled).
+				With("pack", templateName).
+				Hint("Run 'go-arch template install' to install the required template pack.").
+				Errorf("pack %q is not installed (declared in .go-arch.yaml template field)", templateName)
+		}
+
 		return runComponentDispatch(compType, name, config, runner, routeFlag, cmd)
 	},
 }
@@ -169,20 +182,22 @@ func runBuiltinDispatch(compType, name string, config *ui.ProjectConfig, runner 
 	return nil
 }
 
+// isKnownComponentType returns true if t is a built-in component type.
+func isKnownComponentType(t string) bool {
+	switch t {
+	case "service", "repository", "handler", "crud", "page", "component":
+		return true
+	}
+	return false
+}
+
 // runComponentDispatch handles component type generation (tier 3).
 func runComponentDispatch(compType, name string, config *ui.ProjectConfig, runner *hooks.Runner, routeFlag string, cmd *cobra.Command) error {
 	// Check if this is a known component type.
-	knownTypes := map[string]bool{
-		"service": true, "repository": true, "handler": true,
-		"crud": true, "page": true, "component": true,
-	}
-	if !knownTypes[compType] {
-		// Not a known component type — produce unknown_generator error.
-		return oops.
-			Code(generators.CodeUnknownGenerator).
-			With("type", compType).
-			Hint("Use --list to see available generators").
-			Errorf("unknown generator %q: available component types: service, repository, handler, crud, page, component", compType)
+	if !isKnownComponentType(compType) {
+		// Not a known component type — produce unknown_generator error
+		// with available names grouped by source.
+		return buildUnknownGeneratorError(compType)
 	}
 	ui.Info(fmt.Sprintf("Generating %s component: %s...", compType, name))
 
@@ -287,4 +302,55 @@ builtins:
 // templHint returns the post-success hint printed after page/component generation.
 func templHint(genType string) string {
 	return fmt.Sprintf("💡 Run `templ generate` to compile the new %s.", genType)
+}
+
+// buildUnknownGeneratorError constructs an unknown_generator error with
+// available generators grouped by source (pack, builtin, component types).
+func buildUnknownGeneratorError(compType string) error {
+	var groups []string
+
+	// Always list component types.
+	groups = append(groups, fmt.Sprintf("component types: service, repository, handler, crud, page, component"))
+
+	// Builtin generators.
+	if len(generators.BuiltinRegistry) > 0 {
+		names := make([]string, 0, len(generators.BuiltinRegistry))
+		for n := range generators.BuiltinRegistry {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		groups = append(groups, fmt.Sprintf("builtin: %s", strings.Join(names, ", ")))
+	}
+
+	// Pack generators (if project has a template and the pack is installed).
+	templateName := viper.GetString("template")
+	if templateName != "" {
+		packName, packVersion, parseErr := packs.ParseRef(templateName)
+		if parseErr == nil {
+			if packVersion == "" {
+				latest, lErr := packs.LatestInstalled(packName)
+				if lErr == nil {
+					packVersion = latest
+				}
+			}
+			if packVersion != "" {
+				packDir := packs.Path(packName, packVersion)
+				packManifest, mErr := packs.Load(packDir)
+				if mErr == nil && len(packManifest.Generators) > 0 {
+					names := make([]string, 0, len(packManifest.Generators))
+					for n := range packManifest.Generators {
+						names = append(names, n)
+					}
+					sort.Strings(names)
+					groups = append(groups, fmt.Sprintf("pack (%s): %s", packName, strings.Join(names, ", ")))
+				}
+			}
+		}
+	}
+
+	return oops.
+		Code(generators.CodeUnknownGenerator).
+		With("type", compType).
+		Hint("Use --list to see available generators").
+		Errorf("unknown generator %q: %s", compType, strings.Join(groups, "; "))
 }
