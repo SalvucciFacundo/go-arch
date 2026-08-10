@@ -163,3 +163,81 @@ func TestListPacksHandler(t *testing.T) {
 		}
 	})
 }
+
+// TestRemovePackHandler verifies remove_pack removes an installed pack and
+// resolves latest version for bare names.
+func TestRemovePackHandler(t *testing.T) {
+	t.Run("removes installed pack", func(t *testing.T) {
+		old := os.Getenv("GO_ARCH_PACKS_DIR")
+		defer os.Setenv("GO_ARCH_PACKS_DIR", old)
+		os.Setenv("GO_ARCH_PACKS_DIR", t.TempDir())
+
+		handleInstallTemplate(1, "github.com/user/go-arch-express", false,
+			&packs.FakeDownloader{Dir: makeFakePackDir(t, false)})
+
+		out := captureStdout(func() {
+			handleRemovePack(1, "express")
+		})
+		if !strings.Contains(out, "removed") {
+			t.Errorf("expected removal message, got:\n%s", out)
+		}
+
+		listed, err := packs.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(listed) != 0 {
+			t.Errorf("expected empty pack list after remove, got %+v", listed)
+		}
+	})
+
+	t.Run("not installed errors", func(t *testing.T) {
+		old := os.Getenv("GO_ARCH_PACKS_DIR")
+		defer os.Setenv("GO_ARCH_PACKS_DIR", old)
+		os.Setenv("GO_ARCH_PACKS_DIR", t.TempDir())
+
+		out := captureStdout(func() {
+			handleRemovePack(1, "ghost")
+		})
+		if !strings.Contains(out, "not installed") && !strings.Contains(out, "Failed") {
+			t.Errorf("expected failure message, got:\n%s", out)
+		}
+	})
+}
+
+// TestUpdatePackHandler verifies update_pack re-fetches and reinstalls.
+func TestUpdatePackHandler(t *testing.T) {
+	t.Run("updates installed pack", func(t *testing.T) {
+		old := os.Getenv("GO_ARCH_PACKS_DIR")
+		defer os.Setenv("GO_ARCH_PACKS_DIR", old)
+		os.Setenv("GO_ARCH_PACKS_DIR", t.TempDir())
+
+		// Install v1.0.0 first (writes sidecar with module ref).
+		handleInstallTemplate(1, "github.com/user/go-arch-express@v1.0.0", false,
+			&packs.FakeDownloader{Dir: makeFakePackDir(t, false)})
+
+		// Update: fake downloader returns a v2.0.0 pack dir.
+		v2 := makeFakePackDir(t, false)
+		// The update path reads the module ref from the sidecar and re-fetches
+		// @latest; the fake returns the v2 dir.
+		out := captureStdout(func() {
+			handleUpdatePack(1, "express", false, &packs.FakeDownloader{Dir: v2})
+		})
+		if !strings.Contains(out, "updated") {
+			t.Errorf("expected update message, got:\n%s", out)
+		}
+	})
+
+	t.Run("not installed errors", func(t *testing.T) {
+		old := os.Getenv("GO_ARCH_PACKS_DIR")
+		defer os.Setenv("GO_ARCH_PACKS_DIR", old)
+		os.Setenv("GO_ARCH_PACKS_DIR", t.TempDir())
+
+		out := captureStdout(func() {
+			handleUpdatePack(1, "ghost", false, &packs.FakeDownloader{})
+		})
+		if !strings.Contains(out, "Failed to update pack") {
+			t.Errorf("expected failure message, got:\n%s", out)
+		}
+	})
+}

@@ -301,6 +301,38 @@ func handleRequest(req *Request) {
 						"properties": map[string]interface{}{},
 					},
 				},
+				map[string]interface{}{
+					"name":        "remove_pack",
+					"description": "Remove an installed template pack. Without @version, the latest installed version is removed. With @version, only that specific version is removed.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"name": map[string]interface{}{
+								"type":        "string",
+								"description": "Pack name, optionally with @version (e.g. 'express' or 'express@1.0.0').",
+							},
+						},
+						"required": []string{"name"},
+					},
+				},
+				map[string]interface{}{
+					"name":        "update_pack",
+					"description": "Update an installed template pack to its latest version. Re-fetches the module recorded in the pack's sidecar. If the pack declares hooks/generators that run commands, they are disabled unless allowHooks is true.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"name": map[string]interface{}{
+								"type":        "string",
+								"description": "Pack name to update (e.g. 'express').",
+							},
+							"allowHooks": map[string]interface{}{
+								"type":        "boolean",
+								"description": "When true, enable hooks/generators that run shell commands after the update. Default false (safest).",
+							},
+						},
+						"required": []string{"name"},
+					},
+				},
 			},
 		})
 	case "tools/call":
@@ -943,9 +975,80 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 		result, _ := json.MarshalIndent(out, "", "  ")
 		sendToolResult(id, string(result), false)
 
+	case "remove_pack":
+		var args struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(arguments, &args); err != nil {
+			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+		if args.Name == "" {
+			sendError(id, -32602, "Missing required argument", "name is required")
+			return
+		}
+		handleRemovePack(id, args.Name)
+
+	case "update_pack":
+		var args struct {
+			Name       string `json:"name"`
+			AllowHooks bool   `json:"allowHooks"`
+		}
+		if err := json.Unmarshal(arguments, &args); err != nil {
+			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+		handleUpdatePack(id, args.Name, args.AllowHooks, packs.RealDownloader{})
+
 	default:
 		sendError(id, -32601, "Tool not found", nil)
 	}
+}
+
+// handleRemovePack removes an installed pack. Bare names resolve to the latest
+// installed version (mirrors the CLI template remove command).
+func handleRemovePack(id interface{}, ref string) {
+	name, version, err := packs.ParseRef(ref)
+	if err != nil {
+		sendToolResult(id, fmt.Sprintf("Invalid pack reference %q: %v", ref, err), true)
+		return
+	}
+	if version == "" {
+		latest, latestErr := packs.LatestInstalled(name)
+		if latestErr != nil {
+			sendToolResult(id, fmt.Sprintf("Failed to resolve latest version: %v", latestErr), true)
+			return
+		}
+		version = latest
+	}
+	if err := packs.Remove(name, version); err != nil {
+		sendToolResult(id, fmt.Sprintf("Failed to remove pack: %v", err), true)
+		return
+	}
+	sendToolResult(id, fmt.Sprintf("✅ Pack %q (v%s) removed.", name, version), false)
+}
+
+// handleUpdatePack updates an installed pack. The downloader is injectable for
+// tests (FakeDownloader); production uses RealDownloader. allowHooks is the
+// explicit agent decision — MCP is non-interactive (no trust prompt).
+func handleUpdatePack(id interface{}, name string, allowHooks bool, dl packs.Downloader) {
+	if name == "" {
+		sendError(id, -32602, "Missing required argument", "name is required")
+		return
+	}
+	confirm := func(packName string) (bool, error) {
+		return allowHooks, nil
+	}
+	m, err := packs.Update(context.Background(), dl, name, confirm)
+	if err != nil {
+		sendToolResult(id, fmt.Sprintf("Failed to update pack: %v", err), true)
+		return
+	}
+	status := "updated with hooks disabled"
+	if allowHooks {
+		status = "updated with hooks enabled"
+	}
+	sendToolResult(id, fmt.Sprintf("✅ Pack %q (v%s) %s.", m.Name, m.Version, status), false)
 }
 
 // handleInstallTemplate installs a template pack via MCP. The downloader is
