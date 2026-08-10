@@ -531,6 +531,10 @@ func TestRun_PrePostHooks(t *testing.T) {
 	if firer.called < 2 {
 		t.Errorf("firer called %d times, want at least 2 (pre + post)", firer.called)
 	}
+	// GeneratorName must be passed through to the EnvContext for hook env injection.
+	if firer.lastCtx.GeneratorName != "docker" {
+		t.Errorf("lastCtx.GeneratorName: want docker, got %q", firer.lastCtx.GeneratorName)
+	}
 }
 
 func TestRun_PostHookSkippedOnFailure(t *testing.T) {
@@ -573,6 +577,10 @@ func TestRun_PostHookSkippedOnFailure(t *testing.T) {
 	// Pre was called (call 1), step was called (call 2), post should NOT be called.
 	if firer.called != 2 {
 		t.Errorf("firer called %d times, want 2 (pre + step, NOT post)", firer.called)
+	}
+	// GeneratorName must be passed to pre hook even on step failure.
+	if firer.lastCtx.GeneratorName != "test-gen" {
+		t.Errorf("lastCtx.GeneratorName: want test-gen, got %q", firer.lastCtx.GeneratorName)
 	}
 }
 

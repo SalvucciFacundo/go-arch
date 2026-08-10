@@ -110,8 +110,9 @@ func Run(ctx context.Context, g Generator, opts RunOptions) ([]Record, error) {
 	// --- Execution ---
 	var records []Record
 	hookCtx := hooks.EnvContext{
-		PackName:    opts.PackName,
-		PackVersion: opts.PackVersion,
+		PackName:      opts.PackName,
+		PackVersion:   opts.PackVersion,
+		GeneratorName: opts.GeneratorName,
 	}
 
 	// Pre hooks.
@@ -185,8 +186,9 @@ func runSteps(opts *RunOptions, records *[]Record, g Generator) error {
 				IgnoreFailure: s.IgnoreFailure,
 			}
 			if err := opts.Firer.FireEntries([]hooks.Entry{entry}, hooks.EnvContext{
-				PackName:    opts.PackName,
-				PackVersion: opts.PackVersion,
+				PackName:      opts.PackName,
+				PackVersion:   opts.PackVersion,
+				GeneratorName: opts.GeneratorName,
 			}, opts.ProjectRoot); err != nil {
 				if s.IgnoreFailure {
 					fmt.Fprintf(opts.Out, "⚠ step %d (run) failed (ignored): %v\n", i, err)

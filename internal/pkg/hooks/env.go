@@ -42,6 +42,9 @@ func BuildEnv(parent []string, ctx EnvContext, perEntry map[string]string) []str
 	if ctx.PackVersion != "" {
 		standardEnvs["PACK_VERSION"] = ctx.PackVersion
 	}
+	if ctx.GeneratorName != "" {
+		standardEnvs["GENERATOR_NAME"] = ctx.GeneratorName
+	}
 	for k, v := range standardEnvs {
 		result[k] = fmt.Sprintf("%s=%s", k, v)
 	}

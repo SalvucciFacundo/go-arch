@@ -253,3 +253,79 @@ func TestBuildEnv_PackEnvVarsAbsent(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildEnv_GeneratorNamePresent verifies that GENERATOR_NAME is
+// injected alongside PACK_NAME and PACK_VERSION when GeneratorName
+// is non-empty, matching the pattern used for pack env vars.
+func TestBuildEnv_GeneratorNamePresent(t *testing.T) {
+	ctx := EnvContext{
+		ProjectName:   "myapp",
+		ProjectPath:   "/tmp/myapp",
+		Arch:          "Standard",
+		HookType:      PostGenerate,
+		PackName:      "express",
+		PackVersion:   "1.0.0",
+		GeneratorName: "docker",
+	}
+
+	result := BuildEnv(nil, ctx, nil)
+
+	assertEnv(t, result, "GENERATOR_NAME", "docker")
+	assertEnv(t, result, "PACK_NAME", "express")
+	assertEnv(t, result, "PACK_VERSION", "1.0.0")
+	// Standard vars still present
+	assertEnv(t, result, "PROJECT_NAME", "myapp")
+	assertEnv(t, result, "HOOK_TYPE", "post-generate")
+}
+
+// TestBuildEnv_GeneratorNameAbsent verifies that GENERATOR_NAME is NOT
+// injected when GeneratorName is empty, parallel to how PACK_NAME is
+// absent when empty.
+func TestBuildEnv_GeneratorNameAbsent(t *testing.T) {
+	ctx := EnvContext{
+		ProjectName: "myapp",
+		ProjectPath: "/tmp/myapp",
+		Arch:        "Standard",
+		HookType:    PostGenerate,
+		PackName:    "express",
+		PackVersion: "1.0.0",
+		// GeneratorName intentionally empty (zero value)
+	}
+
+	result := BuildEnv(nil, ctx, nil)
+
+	// GENERATOR_NAME must NOT be present
+	for _, e := range result {
+		if strings.HasPrefix(e, "GENERATOR_NAME=") {
+			t.Errorf("expected GENERATOR_NAME to be absent when empty, but found: %s", e)
+		}
+	}
+	// PACK_NAME still present
+	assertEnv(t, result, "PACK_NAME", "express")
+}
+
+// TestBuildEnv_GeneratorNameNoLeak verifies that two sequential
+// invocations with different GeneratorName values do NOT leak the
+// first invocation's GENERATOR_NAME into the second.
+func TestBuildEnv_GeneratorNameNoLeak(t *testing.T) {
+	ctx1 := EnvContext{
+		ProjectName:   "myapp",
+		ProjectPath:   "/tmp/myapp",
+		Arch:          "Standard",
+		HookType:      PostGenerate,
+		GeneratorName: "docker",
+	}
+	ctx2 := EnvContext{
+		ProjectName:   "myapp",
+		ProjectPath:   "/tmp/myapp",
+		Arch:          "Standard",
+		HookType:      PostGenerate,
+		GeneratorName: "auth",
+	}
+
+	result1 := BuildEnv(nil, ctx1, nil)
+	result2 := BuildEnv(nil, ctx2, nil)
+
+	assertEnv(t, result1, "GENERATOR_NAME", "docker")
+	assertEnv(t, result2, "GENERATOR_NAME", "auth")
+}
