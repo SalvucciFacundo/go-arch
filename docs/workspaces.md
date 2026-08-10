@@ -101,7 +101,7 @@ The CLI changes into the service directory, reloads the service's `.go-arch.yaml
 - Nested workspaces (workspace inside workspace).
 - Concurrent service operations.
 - Cross-service template sharing.
-- MCP workspace tools (the chdir precedent exists; a future version may add them).
+- ~~MCP workspace tools~~ → **done**: `workspace_list`, `workspace_upgrade` (chdir-free via root injection), `workspace_check`, and `service`+`workspacePath` params on `upgrade_project`. `service` on `generate_component`/`check_architecture` remains deferred.
 - `go-arch new` workspace-aware creation.
 
 ---

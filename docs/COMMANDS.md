@@ -168,6 +168,10 @@ Every CLI command has a corresponding MCP tool for agents:
 | `go-arch template list` | `list_packs` | List installed template packs with versions |
 | `go-arch template remove` | `remove_pack` | Remove an installed pack (bare name resolves the latest version) |
 | `go-arch template update` | `update_pack` | Update an installed pack to its latest version. `allowHooks: true` re-enables command-running hooks |
+| `go-arch workspace list` | `workspace_list` | List services in a workspace (name, path, template) |
+| `go-arch workspace upgrade` | `workspace_upgrade` | Upgrade all workspace services (dry-run by default; `apply: true` commits). Chdir-free via root injection |
+| `go-arch workspace check` | `workspace_check` | Run the architecture check for all workspace services |
+| `go-arch upgrade --service X` | `upgrade_project` (`service`+`workspacePath`) | Upgrade a single workspace service chdir-free |
 | `go-arch serve` | `serve_project` | Return the exact run command (`air` or `go run <mainPath>`) — agents never start a long-running server over MCP |
 | `go-arch setup` | `setup_environment` | Detect Go/air presence; with `install: true` installs only `air` (user-level, no sudo). The Go toolchain itself is never installed by the tool |
 
