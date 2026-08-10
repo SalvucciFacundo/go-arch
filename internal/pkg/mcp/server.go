@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -272,6 +273,32 @@ func handleRequest(req *Request) {
 								"description": "When true, apply all upgradable changes and return the applied plan. Default: false.",
 							},
 						},
+					},
+				},
+				map[string]interface{}{
+					"name":        "install_template",
+					"description": "Install a template pack from a Go module (e.g. 'github.com/user/go-arch-express' or 'github.com/user/go-arch-express@v1.0.0'). Fetches via the Go module proxy, validates the pack contract, and installs it under ~/.go-arch/packs/<name>@<version>/. If the pack declares hooks or generators that run commands, they are disabled unless allowHooks is true.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"module": map[string]interface{}{
+								"type":        "string",
+								"description": "Go module path of the pack (e.g. github.com/user/go-arch-express). Optional @version suffix.",
+							},
+							"allowHooks": map[string]interface{}{
+								"type":        "boolean",
+								"description": "When true, enable hooks/generators that run shell commands from this pack. Default false (safest).",
+							},
+						},
+						"required": []string{"module"},
+					},
+				},
+				map[string]interface{}{
+					"name":        "list_packs",
+					"description": "List installed template packs with their versions. Returns an empty list when no packs are installed.",
+					"inputSchema": map[string]interface{}{
+						"type":       "object",
+						"properties": map[string]interface{}{},
 					},
 				},
 			},
@@ -884,9 +911,79 @@ func handleToolCall(id interface{}, name string, arguments json.RawMessage) {
 		result, _ := json.MarshalIndent(plan, "", "  ")
 		sendToolResult(id, string(result), false)
 
+	case "install_template":
+		var args struct {
+			Module     string `json:"module"`
+			AllowHooks bool   `json:"allowHooks"`
+		}
+		if err := json.Unmarshal(arguments, &args); err != nil {
+			sendError(id, -32602, "Invalid tool arguments", err.Error())
+			return
+		}
+		handleInstallTemplate(id, args.Module, args.AllowHooks, packs.RealDownloader{})
+
+	case "list_packs":
+		packsList, err := packs.List()
+		if err != nil {
+			sendToolResult(id, fmt.Sprintf("Failed to list packs: %v", err), true)
+			return
+		}
+
+		type PackInfo struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		}
+		var out []PackInfo
+		for _, p := range packsList {
+			out = append(out, PackInfo{Name: p.Name, Version: p.Version})
+		}
+		if out == nil {
+			out = []PackInfo{} // JSON [] not null
+		}
+		result, _ := json.MarshalIndent(out, "", "  ")
+		sendToolResult(id, string(result), false)
+
 	default:
 		sendError(id, -32601, "Tool not found", nil)
 	}
+}
+
+// handleInstallTemplate installs a template pack via MCP. The downloader is
+// injectable so tests can avoid the network (FakeDownloader); production uses
+// RealDownloader. MCP is non-interactive: allowHooks is the explicit agent
+// decision; without it, hooks/generators that run commands stay disabled
+// (equivalent to declining the CLI trust prompt).
+func handleInstallTemplate(id interface{}, moduleRef string, allowHooks bool, dl packs.Downloader) {
+	if moduleRef == "" {
+		sendError(id, -32602, "Missing required argument", "module is required")
+		return
+	}
+
+	module, version, err := packs.ParseRef(moduleRef)
+	if err != nil {
+		sendToolResult(id, fmt.Sprintf("Invalid pack reference %q: %v", moduleRef, err), true)
+		return
+	}
+	if version == "" {
+		version = "latest"
+	}
+
+	confirm := func(packName string) (bool, error) {
+		return allowHooks, nil
+	}
+
+	m, err := packs.Install(context.Background(), dl, module, version, confirm)
+	if err != nil {
+		sendToolResult(id, fmt.Sprintf("Pack install failed: %v", err), true)
+		return
+	}
+
+	status := "installed with hooks disabled"
+	if allowHooks {
+		status = "installed with hooks enabled"
+	}
+	result := fmt.Sprintf("✅ Pack %q (v%s) %s.", m.Name, m.Version, status)
+	sendToolResult(id, result, false)
 }
 
 func sendToolResult(id interface{}, text string, isError bool) {
