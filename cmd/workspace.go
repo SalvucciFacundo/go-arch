@@ -6,8 +6,10 @@ import (
 
 	"github.com/samber/oops"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"go-arch/internal/pkg/workspace"
+	"go-arch/internal/ui"
 )
 
 // workspaceCmd is the parent command for workspace operations.
@@ -23,6 +25,7 @@ run (exit code is non-zero if any service failed).`,
 func init() {
 	RootCmd.AddCommand(workspaceCmd)
 	workspaceCmd.AddCommand(workspaceUpgradeCmd)
+	workspaceCmd.AddCommand(workspaceCheckCmd)
 	workspaceCmd.PersistentFlags().String("workspace", "", "path to go-arch.workspace.yaml (default: discover upward)")
 	workspaceUpgradeCmd.Flags().Bool("yes", false, "apply upgrades (default: dry-run)")
 }
@@ -120,4 +123,48 @@ func printServiceSummary(out interface{ Write([]byte) (int, error) }, results ma
 		}
 	}
 	return anyFailed
+}
+
+// workspaceCheckCmd checks every service in the workspace in order.
+var workspaceCheckCmd = &cobra.Command{
+	Use:   "check",
+	Short: "Check architecture health of all services",
+	Long: `Runs the architecture check for every service declared in
+go-arch.workspace.yaml, in declaration order. A failing service is reported
+and the remaining services still run; the command exits non-zero if any failed.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		wsFlag, _ := cmd.Flags().GetString("workspace")
+		ws, err := resolveWorkspace(wsFlag)
+		if err != nil {
+			return err
+		}
+
+		out := cmd.OutOrStdout()
+		results := make(map[string]error, len(ws.Services))
+
+		for _, svc := range ws.Services {
+			err := withService(ws, svc.Name, func() error {
+				projectName := viper.GetString("project_name")
+				if projectName == "" {
+					return oops.
+						Code("service_no_manifest").
+						Errorf("service %q has no manifest", svc.Name)
+				}
+				return checkProject(&ui.ProjectConfig{
+					ProjectName:  projectName,
+					ModuleName:   viper.GetString("module_name"),
+					Architecture: viper.GetString("architecture"),
+				}, cmd)
+			})
+			results[svc.Name] = err
+		}
+
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Workspace check summary:")
+		anyFailed := printServiceSummary(out, results)
+		if anyFailed {
+			return oops.Code("workspace_check_failed").Errorf("one or more services failed the check")
+		}
+		return nil
+	},
 }

@@ -18,6 +18,8 @@ import (
 func init() {
 	generateCmd.Flags().String("route", "", `Route pattern for handler type (e.g. "GET /stats"). CRUD auto-registers in web projects.`)
 	generateCmd.Flags().Bool("list", false, "List available generators grouped by source")
+	addServiceFlag(generateCmd)
+	generateCmd.Flags().String("workspace", "", "path to go-arch.workspace.yaml (default: discover upward)")
 	RootCmd.AddCommand(generateCmd)
 }
 
@@ -67,94 +69,111 @@ Flags:
 		compType := args[0]
 		name := args[1]
 
-		projectName := viper.GetString("project_name")
-		if projectName == "" {
-			return oops.
-				Code("missing_config").
-				Hint("Run 'go-arch setup' to initialize the project").
-				Errorf(".go-arch.yaml file not found or empty")
-		}
-
-		config := &ui.ProjectConfig{
-			ProjectName:  projectName,
-			ModuleName:   viper.GetString("module_name"),
-			Architecture: viper.GetString("architecture"),
-			DBDriver:     viper.GetString("db_driver"),
-			UseDocker:    viper.GetBool("use_docker"),
-			UseTemplHTMX: viper.GetBool("use_templ_htmx"),
-		}
-
-		routeFlag, _ := cmd.Flags().GetString("route")
-
-		hooksCfg, loadErr := hooks.Load(hooks.ResolveConfigPath())
-		if loadErr != nil {
-			return oops.
-				Code("hooks_load_failed").
-				Wrap(loadErr)
-		}
-		runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
-
-		// --- Three-tier generator dispatch ---
-		// Check builtins first (Tier 2) since they don't need pack.
-		if _, ok := generators.BuiltinRegistry[compType]; ok {
-			return runBuiltinDispatch(compType, name, config, runner)
-		}
-
-		// Tier 1: pack generators (if project has a template).
-		templateName := viper.GetString("template")
-		packResolved := false
-		if templateName != "" {
-			packName, packVersion, parseErr := packs.ParseRef(templateName)
-			if parseErr == nil {
-				if packVersion == "" {
-					latest, lErr := packs.LatestInstalled(packName)
-					if lErr == nil {
-						packVersion = latest
-					}
-				}
-				if packVersion != "" {
-					packDir := packs.Path(packName, packVersion)
-					packManifest, mErr := packs.Load(packDir)
-					if mErr == nil {
-						packResolved = true
-						if _, ok := packManifest.Generators[compType]; ok {
-							config.Template = packName
-							pi := packs.PackInfo{Dir: packDir, Manifest: packManifest}
-							scaffolder := scaffold.NewScaffolder(config,
-								scaffold.WithRunner(runner),
-								scaffold.WithPackInfo(pi),
-							)
-							if err := scaffolder.GeneratePackGenerator(compType, nil); err != nil {
-								return oops.
-									Code("generation_failed").
-									With("type", compType).
-									With("name", name).
-									Wrapf(err, "Pack generator failed")
-							}
-							ui.Success(fmt.Sprintf("Generator '%s' (%s) from pack '%s' completed.", name, compType, packName))
-							return nil
-						}
-					}
-					// Pack installed but generator not found — fall through.
-				}
-				// Pack not installed or could not resolve version.
-				// Try component type directly.
+		// --service: run the generation inside a workspace service.
+		if svcName := getServiceFlag(cmd); svcName != "" {
+			wsFlag, _ := cmd.Flags().GetString("workspace")
+			ws, err := requireWorkspace(wsFlag)
+			if err != nil {
+				return err
 			}
+			return withService(ws, svcName, func() error {
+				return runGenerate(cmd, compType, name)
+			})
 		}
 
-		// Tier 3: component types. If a template was declared but the pack
-		// was NOT successfully resolved, and the type is not a known
-		// component type, emit pack_not_installed.
-		if templateName != "" && !packResolved && !isKnownComponentType(compType) {
-			return oops.
-				Code(generators.CodePackNotInstalled).
-				With("pack", templateName).
-				Hint("Run 'go-arch template install' to install the required template pack.").
-				Errorf("pack %q is not installed (declared in .go-arch.yaml template field)", templateName)
-		}
-
-		return runComponentDispatch(compType, name, config, runner, routeFlag, cmd)
+		return runGenerate(cmd, compType, name)
 	},
+}
+
+// runGenerate runs the standard generate dispatch for the current directory.
+func runGenerate(cmd *cobra.Command, compType, name string) error {
+	projectName := viper.GetString("project_name")
+	if projectName == "" {
+		return oops.
+			Code("missing_config").
+			Hint("Run 'go-arch setup' to initialize the project").
+			Errorf(".go-arch.yaml file not found or empty")
+	}
+
+	config := &ui.ProjectConfig{
+		ProjectName:  projectName,
+		ModuleName:   viper.GetString("module_name"),
+		Architecture: viper.GetString("architecture"),
+		DBDriver:     viper.GetString("db_driver"),
+		UseDocker:    viper.GetBool("use_docker"),
+		UseTemplHTMX: viper.GetBool("use_templ_htmx"),
+	}
+
+	routeFlag, _ := cmd.Flags().GetString("route")
+
+	hooksCfg, loadErr := hooks.Load(hooks.ResolveConfigPath())
+	if loadErr != nil {
+		return oops.
+			Code("hooks_load_failed").
+			Wrap(loadErr)
+	}
+	runner := hooks.NewRunner(hooksCfg, hooks.RealRunner{}, ui.Out)
+
+	// --- Three-tier generator dispatch ---
+	// Check builtins first (Tier 2) since they don't need pack.
+	if _, ok := generators.BuiltinRegistry[compType]; ok {
+		return runBuiltinDispatch(compType, name, config, runner)
+	}
+
+	// Tier 1: pack generators (if project has a template).
+	templateName := viper.GetString("template")
+	packResolved := false
+	if templateName != "" {
+		packName, packVersion, parseErr := packs.ParseRef(templateName)
+		if parseErr == nil {
+			if packVersion == "" {
+				latest, lErr := packs.LatestInstalled(packName)
+				if lErr == nil {
+					packVersion = latest
+				}
+			}
+			if packVersion != "" {
+				packDir := packs.Path(packName, packVersion)
+				packManifest, mErr := packs.Load(packDir)
+				if mErr == nil {
+					packResolved = true
+					if _, ok := packManifest.Generators[compType]; ok {
+						config.Template = packName
+						pi := packs.PackInfo{Dir: packDir, Manifest: packManifest}
+						scaffolder := scaffold.NewScaffolder(config,
+							scaffold.WithRunner(runner),
+							scaffold.WithPackInfo(pi),
+						)
+						if err := scaffolder.GeneratePackGenerator(compType, nil); err != nil {
+							return oops.
+								Code("generation_failed").
+								With("type", compType).
+								With("name", name).
+								Wrapf(err, "Pack generator failed")
+						}
+						ui.Success(fmt.Sprintf("Generator '%s' (%s) from pack '%s' completed.", name, compType, packName))
+						return nil
+					}
+				}
+				// Pack installed but generator not found — fall through.
+			}
+			// Pack not installed or could not resolve version.
+			// Try component type directly.
+		}
+	}
+
+	// Tier 3: component types. If a template was declared but the pack
+	// was NOT successfully resolved, and the type is not a known
+	// component type, emit pack_not_installed.
+	if templateName != "" && !packResolved && !isKnownComponentType(compType) {
+		return oops.
+			Code(generators.CodePackNotInstalled).
+			With("pack", templateName).
+			Hint("Run 'go-arch template install' to install the required template pack.").
+			Errorf("pack %q is not installed (declared in .go-arch.yaml template field)", templateName)
+	}
+
+	return runComponentDispatch(compType, name, config, runner, routeFlag, cmd)
 }
 
 // runBuiltinDispatch handles a registered builtin generator.

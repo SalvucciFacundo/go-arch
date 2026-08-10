@@ -17,14 +17,17 @@ func makeTestService(t *testing.T, dir, name string) {
 	}
 	cfg := `project_name: ` + name + `
 module_name: example.com/` + name + `
-architecture: hexagonal
+architecture: Hexagonal
 `
 	if err := os.WriteFile(filepath.Join(dir, ".go-arch.yaml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	manifest := `files: {}
 `
-	if err := os.WriteFile(filepath.Join(dir, ".go-arch-manifest.yaml"), []byte(manifest), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".go-arch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".go-arch", "manifest.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
