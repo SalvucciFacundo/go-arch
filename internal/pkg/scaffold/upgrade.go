@@ -70,13 +70,12 @@ func hashBytes(data []byte) string {
 // inside the project; --project-path does chdir before Upgrade is called.
 // cfg.ProjectName is the project name metadata, NOT a directory path (ADR-7).
 func Upgrade(cfg *ui.ProjectConfig, opts ...UpgradeOption) (*UpgradePlan, error) {
-	root := "." // ADR-7: always CWD
-
 	// Resolve upgrade options.
-	uc := &upgradeConfig{}
+	uc := &upgradeConfig{root: "."} // ADR-7 default: CWD is the project root
 	for _, opt := range opts {
 		opt(uc)
 	}
+	root := uc.root
 
 	if !ManifestExists(root) {
 		return upgradeLegacy(cfg, root)

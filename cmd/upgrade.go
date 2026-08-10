@@ -21,6 +21,8 @@ func init() {
 	upgradeCmd.Flags().Bool("dry-run", true, "Print plan only, do not apply changes (default)")
 	upgradeCmd.Flags().Bool("yes", false, "Apply all upgradable files without prompting")
 	upgradeCmd.Flags().String("project-path", "", "Override project root directory")
+	addServiceFlag(upgradeCmd)
+	upgradeCmd.Flags().String("workspace", "", "path to go-arch.workspace.yaml (default: discover upward)")
 }
 
 var upgradeCmd = &cobra.Command{
@@ -30,100 +32,116 @@ var upgradeCmd = &cobra.Command{
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dryRunSet := cmd.Flags().Changed("dry-run")
-		yesSet := cmd.Flags().Changed("yes")
+		// --service: run the upgrade inside a workspace service.
+		if svcName := getServiceFlag(cmd); svcName != "" {
+			wsFlag, _ := cmd.Flags().GetString("workspace")
+			ws, err := requireWorkspace(wsFlag)
+			if err != nil {
+				return err
+			}
+			return withService(ws, svcName, func() error {
+				return runUpgrade(cmd)
+			})
+		}
+		return runUpgrade(cmd)
+	},
+}
 
-		// Mutual exclusion: both explicitly supplied → usage error.
-		// Using Changed() instead of value comparison because dry-run defaults
-		// to true, so a value check would always see both as "true".
-		if dryRunSet && yesSet {
-			return oops.Code("invalid_flags").
-				Hint("Use --dry-run to preview, or --yes to apply. They are mutually exclusive.").
-				Errorf("--dry-run and --yes are mutually exclusive")
+// runUpgrade runs the standard upgrade flow for the current directory.
+func runUpgrade(cmd *cobra.Command) error {
+	dryRunSet := cmd.Flags().Changed("dry-run")
+	yesSet := cmd.Flags().Changed("yes")
+
+	// Mutual exclusion: both explicitly supplied → usage error.
+	// Using Changed() instead of value comparison because dry-run defaults
+	// to true, so a value check would always see both as "true".
+	if dryRunSet && yesSet {
+		return oops.Code("invalid_flags").
+			Hint("Use --dry-run to preview, or --yes to apply. They are mutually exclusive.").
+			Errorf("--dry-run and --yes are mutually exclusive")
+	}
+
+	projectPath, _ := cmd.Flags().GetString("project-path")
+	if projectPath != "" {
+		if err := os.Chdir(projectPath); err != nil {
+			return oops.Code("invalid_project_path").
+				Hint("Check that the path exists and is a directory").
+				Errorf("cannot change to %s: %v", projectPath, err)
 		}
 
-		projectPath, _ := cmd.Flags().GetString("project-path")
-		if projectPath != "" {
-			if err := os.Chdir(projectPath); err != nil {
-				return oops.Code("invalid_project_path").
-					Hint("Check that the path exists and is a directory").
-					Errorf("cannot change to %s: %v", projectPath, err)
-			}
-
-			// Re-read viper from the new working directory (initConfig
-			// already read from CWD — but we just chdir'd to the target).
-			viper.Reset()
-			viper.AddConfigPath(".")
-			viper.SetConfigName(".go-arch")
-			if err := viper.ReadInConfig(); err != nil {
-				return oops.Code("missing_config").
-					Hint("Run 'go-arch setup' to initialize the project").
-					Errorf("No valid configuration found. Are you in the root of a go-arch project?")
-			}
-		}
-
-		// Validate config (missing_config pattern from check.go)
-		projectName := viper.GetString("project_name")
-		if projectName == "" {
+		// Re-read viper from the new working directory (initConfig
+		// already read from CWD — but we just chdir'd to the target).
+		viper.Reset()
+		viper.AddConfigPath(".")
+		viper.SetConfigName(".go-arch")
+		if err := viper.ReadInConfig(); err != nil {
 			return oops.Code("missing_config").
 				Hint("Run 'go-arch setup' to initialize the project").
 				Errorf("No valid configuration found. Are you in the root of a go-arch project?")
 		}
+	}
 
-		cfg := configFromViper(projectName)
+	// Validate config (missing_config pattern from check.go)
+	projectName := viper.GetString("project_name")
+	if projectName == "" {
+		return oops.Code("missing_config").
+			Hint("Run 'go-arch setup' to initialize the project").
+			Errorf("No valid configuration found. Are you in the root of a go-arch project?")
+	}
 
-		plan, err := scaffold.Upgrade(cfg, scaffold.WithResolver(scaffold.DefaultResolver{}))
-		if err != nil {
-			return oops.Code("upgrade_failed").Wrapf(err, "Upgrade classification failed")
-		}
+	cfg := configFromViper(projectName)
 
-		// Always display the plan to the command's output writer
-		out := cmd.OutOrStdout()
-		displayPlan(out, plan)
+	plan, err := scaffold.Upgrade(cfg, scaffold.WithResolver(scaffold.DefaultResolver{}))
+	if err != nil {
+		return oops.Code("upgrade_failed").Wrapf(err, "Upgrade classification failed")
+	}
 
-		yes, _ := cmd.Flags().GetBool("yes")
-		isTTY := term.IsTerminal(int(os.Stdin.Fd()))
+	// Always display the plan to the command's output writer
+	out := cmd.OutOrStdout()
+	displayPlan(out, plan)
 
-		// Decision: apply or plan-only (ADR-6)
-		if !yes {
-			// Non-TTY without --yes: plan only (spec: exit 0)
-			if !isTTY {
-				return nil
-			}
-			// TTY without --yes: for legacy, interactive per-file; for manifest, plan only
-			if plan.IsLegacy {
-				return applyLegacyInteractive(plan, cfg)
-			}
-			return nil // manifest project, default dry-run
-		}
+	yes, _ := cmd.Flags().GetBool("yes")
+	isTTY := term.IsTerminal(int(os.Stdin.Fd()))
 
-		// --yes: apply all upgradable
-		if plan.CountBy(scaffold.ClassUpgradable) == 0 {
-			fmt.Fprintf(out, "%s All files are up to date.\n", ansiSuccess())
+	// Decision: apply or plan-only (ADR-6)
+	if !yes {
+		// Non-TTY without --yes: plan only (spec: exit 0)
+		if !isTTY {
 			return nil
 		}
-
-		applied, err := plan.Apply()
-		if err != nil {
-			return oops.Code("upgrade_apply_failed").Wrapf(err, "Failed to apply upgrade")
+		// TTY without --yes: for legacy, interactive per-file; for manifest, plan only
+		if plan.IsLegacy {
+			return applyLegacyInteractive(plan, cfg)
 		}
+		return nil // manifest project, default dry-run
+	}
 
-		// Surgical version write (ADR-4)
-		configPath := ".go-arch.yaml"
-		if err := scaffold.WriteVersionField(configPath, Version); err != nil {
-			// Non-fatal: warn but don't fail
-			fmt.Fprintf(out, "%s Could not update go_arch_version: %v\n", ansiWarning(), err)
-		}
-
-		fmt.Fprintf(out, "%s Applied %d update(s).\n", ansiSuccess(), applied)
-
-		// templ generate hint (when views or style were upgraded)
-		if plan.TemplHint {
-			fmt.Fprintln(out, "💡 Run `templ generate` to recompile updated views.")
-		}
-
+	// --yes: apply all upgradable
+	if plan.CountBy(scaffold.ClassUpgradable) == 0 {
+		fmt.Fprintf(out, "%s All files are up to date.\n", ansiSuccess())
 		return nil
-	},
+	}
+
+	applied, err := plan.Apply()
+	if err != nil {
+		return oops.Code("upgrade_apply_failed").Wrapf(err, "Failed to apply upgrade")
+	}
+
+	// Surgical version write (ADR-4)
+	configPath := ".go-arch.yaml"
+	if err := scaffold.WriteVersionField(configPath, Version); err != nil {
+		// Non-fatal: warn but don't fail
+		fmt.Fprintf(out, "%s Could not update go_arch_version: %v\n", ansiWarning(), err)
+	}
+
+	fmt.Fprintf(out, "%s Applied %d update(s).\n", ansiSuccess(), applied)
+
+	// templ generate hint (when views or style were upgraded)
+	if plan.TemplHint {
+		fmt.Fprintln(out, "💡 Run `templ generate` to recompile updated views.")
+	}
+
+	return nil
 }
 
 // ──────────────────────────────────────────────────────────
@@ -150,6 +168,8 @@ func configFromViper(projectName string) *ui.ProjectConfig {
 
 func ansiSuccess() string { return "SUCCESS:" }
 func ansiWarning() string { return "WARNING:" }
+func ansiError() string   { return "ERROR:" }
+func ansiInfo() string    { return "INFO:" }
 
 // ──────────────────────────────────────────────────────────
 // displayPlan prints the upgrade plan grouped by classification.
