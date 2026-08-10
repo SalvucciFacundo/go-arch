@@ -33,6 +33,29 @@ The main entry point for scaffolding. It triggers an interactive wizard.
 
 Injects new components into an existing project. It is **Context-Aware**: it reads your `.go-arch.yaml` to know which folder structure to follow.
 
+### Resolution Order
+
+`go-arch generate <name>` resolves through a three-tier lookup, first match wins:
+
+1. **Pack generator** — if your project uses a template pack (`.go-arch.yaml` `template:` field) and the pack declares a generator named `<name>`
+2. **Builtin generator** — CLI-registered builtin generators
+3. **Component types** — the built-in code generators below
+
+### Listing generators: `--list`
+
+```bash
+go-arch generate --list
+# express:
+#   docker  Scaffold Docker setup for the project
+#   auth    Add authentication middleware
+# builtin:
+#   no builtin generators registered
+# component types:
+#   service, repository, handler, crud, page, component
+```
+
+Output is grouped by source and sorted within each group.
+
 ### Component Types:
 - **`service`**: Creates the business logic layer.
 - **`repository`**: Creates the interface and the implementation (SQL/NoSQL).
@@ -119,7 +142,8 @@ Every CLI command has a corresponding MCP tool for agents:
 | CLI command | MCP tool | Purpose |
 |---|---|---|
 | `go-arch new` | `new_project` | Scaffold a new project with layout, DB, Docker, observability, gRPC, and templ+HTMX options |
-| `go-arch generate` | `generate_component` | Generate service/repository/handler/crud/page/component |
+| `go-arch generate` | `generate_component` | Generate service/repository/handler/crud/page/component, or run pack generators with `generatorArgs` |
+| `go-arch generate --list` | `list_generators` | List available generators (pack, builtin, component types) for the current project |
 | `go-arch check` | `check_architecture` | Validate the project structure and import rules |
 | `go-arch serve` | `serve_project` | Return the exact run command (`air` or `go run <mainPath>`) — agents never start a long-running server over MCP |
 | `go-arch setup` | `setup_environment` | Detect Go/air presence; with `install: true` installs only `air` (user-level, no sudo). The Go toolchain itself is never installed by the tool |

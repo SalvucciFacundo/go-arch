@@ -151,15 +151,115 @@ This guarantees that what generated the file is what re-renders it — no silent
 
 ---
 
-## 📐 Contract Evolution (v2)
+## 📐 Contract v2 — Generators
 
-The `contract_version` field lets the CLI reject future schemas it can't handle. If a pack declares `contract_version: 99`, the CLI returns a `contract_version_mismatch` error and does not install the pack.
+Pack contract v2 introduces **generators**: declarative recipes that scaffold project files from a pack. A generator is a named YAML recipe DSL executed by `go-arch generate <name>`.
 
-v2 is explicitly deferred — the v1 surface is intentionally minimal:
+Set `contract_version: 2` in the pack manifest to opt in. The CLI supports v1 and v2 — existing v1 packs continue to work unchanged.
 
-- One manifest schema
-- One template convention (`.tmpl` suffix)
-- One install layout (`<name>@<version>`)
-- One sidecar file (`pack.json`)
+### Manifest schema (v2 additions)
 
-When v2 is needed, it will carry a new `contract_version` and the CLI will reject packs that require it until the upgrade ships.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `contract_version` | int | **yes** | `1` or `2` |
+| `generators` | map | no | Map of generator-name → recipe |
+
+```yaml
+# go-arch.yaml (pack root, v2)
+contract_version: 2
+name: express
+version: 1.0.0
+layout:
+  - cmd/api
+
+generators:
+  docker:
+    description: "Scaffold Docker setup for the project"
+    pre:
+      - echo "Starting Docker scaffold..."
+    steps:
+      - type: template
+        from: "docker/Dockerfile.tmpl"
+        to: "Dockerfile"
+      - type: template
+        from: "docker/docker-compose.yml.tmpl"
+        to: "docker-compose.yml"
+      - type: prompt
+        name: "compose"
+        message: "Include Docker Compose?"
+        default: "true"
+        required: false
+      - type: run
+        command: "echo"
+        args: ["Docker scaffold complete"]
+        silent: true
+    post:
+      - echo "Docker scaffold finished"
+```
+
+### Recipe step types
+
+Each recipe is an ordered list of steps. Steps execute in declaration order — no conditionals or branching in v2.
+
+| Step type | Required fields | Description |
+|---|---|---|
+| `template` | `from`, `to` | Render a pack template (`templates/<from>`) to `<to>`. No chain fallback. |
+| `binary` | `from`, `to` | Copy a file verbatim from the pack. Optional `mode` (file permission octal, default `0644`). |
+| `run` | `command` (or shell string) | Execute a command. Reuses `hooks.Entry` shape: `command`, `args`, `cwd`, `env`, `timeout`, `silent`, `ignore_failure`. |
+| `prompt` | `name`, `message` | Collect a user value. Optional `default`, `required` (boolean). Resolved values flow into `run:` step env and `use:` builtins. |
+| `use` | `value: "builtin/<name>"` | Delegate to a CLI-registered builtin generator. |
+
+### Pre and post hooks
+
+A generator MAY declare `pre:` and `post:` hook lists. These fire around step execution (pre before step 1, post after all steps succeed). Hooks are gated by the same `HooksEnabled` sidecar flag as pack-level hooks.
+
+### Trust model
+
+**run steps and hooks require explicit trust.** When a v2 pack declares generators with `run:` steps or `pre:`/`post:` hooks, the install trust prompt warns about command execution. `HooksEnabled` must be `true` in the sidecar (`pack.json`) for these steps to execute — if disabled, `run:` steps and hooks are skipped with a warning, while `template:` and `binary:` steps still run.
+
+### Path sandbox
+
+All `template` and `binary` target paths are validated **pre-flight** — before ANY file is written. The sandbox rejects:
+
+- Absolute paths (e.g. `/etc/passwd`)
+- `..` traversal (e.g. `../../etc/shadow`)
+- Symlink escapes (resolved real path outside project root)
+
+If ANY step's path escapes, the entire recipe aborts with zero files written. This prevents partial state from a malicious or misconfigured recipe.
+
+### Provenance and upgrade semantics
+
+Generator-produced files are recorded in the project manifest with full provenance:
+
+- **Template-step files**: `origin: template` with `metadata.generator` and `metadata.args`. These files are **upgradable** — `go-arch upgrade` re-renders them from the pack template (byte-identical to normal pack re-renders).
+- **Non-template files** (binary copies, run output): `origin: generator`. These files are **PROTECTED** — never overwritten by upgrade. A per-entry warning tells the user to re-run the generator manually.
+
+Automatic generator re-execution during `go-arch upgrade` is deferred to a future v2.1.
+
+### Lookup order
+
+`go-arch generate <name>` resolves through a three-tier lookup, first match wins:
+
+1. **Pack generator** — if the project's `.go-arch.yaml` declares `template:` and that pack has a generator named `<name>`
+2. **Builtin generator** — if a CLI-registered builtin matches
+3. **Component type** — existing six-type switch (`service`, `repository`, `handler`, `page`, `component`, `crud`)
+
+A pack generator silently shadows a builtin or component type with the same name.
+
+### Listing generators
+
+`go-arch generate --list` prints available generators grouped by source: pack generators (with pack name and description), builtin generators, and component types.
+
+### MCP integration
+
+The MCP server exposes generators through two additions:
+
+- `generate_component`: relaxed `type` enum (any string), plus optional `generatorArgs` object for passing prompt values
+- `list_generators`: returns available generators for the current project context as a structured list
+
+### Contract version compatibility
+
+| CLI version | v1 packs | v2 packs |
+|---|---|---|
+| pre-generators | ✅ Accepted | ❌ Rejected (`contract_version_mismatch`) |
+| with generators | ✅ Accepted | ✅ Accepted |
