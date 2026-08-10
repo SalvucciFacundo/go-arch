@@ -89,11 +89,11 @@ func (r *Runner) Fire(t Type, ctx EnvContext, defaultCwd string) error {
 	parentEnv := os.Environ()
 
 	for _, entry := range entries {
-		name, argv := r.resolveCommand(entry)
+		name, argv := ResolveCommand(entry)
 		env := BuildEnv(parentEnv, ctx, entry.Env)
-		dir := r.resolveDir(defaultCwd, entry.Cwd)
+		dir := ResolveDir(defaultCwd, entry.Cwd)
 
-		timeout, disableCtx := r.resolveTimeout(entry)
+		timeout, disableCtx := ResolveTimeout(entry)
 		runCtx := context.Background()
 		var cancel context.CancelFunc
 		if !disableCtx {
@@ -175,10 +175,10 @@ func (r *Runner) entriesFor(t Type) []Entry {
 	return r.cfg.Hooks[t]
 }
 
-// resolveCommand returns the (name, args) tuple that should be passed to
+// ResolveCommand returns the (name, args) tuple that should be passed to
 // the CommandRunner. Shell entries are dispatched via sh -c (or cmd /c on
 // Windows); object entries use argv-direct execution.
-func (*Runner) resolveCommand(entry Entry) (string, []string) {
+func ResolveCommand(entry Entry) (string, []string) {
 	if entry.Shell {
 		cmdLine := entry.Command
 		for _, a := range entry.Args {
@@ -192,21 +192,21 @@ func (*Runner) resolveCommand(entry Entry) (string, []string) {
 	return entry.Command, entry.Args
 }
 
-// resolveDir joins the per-entry cwd override onto defaultCwd.
-func (*Runner) resolveDir(defaultCwd, override string) string {
+// ResolveDir joins the per-entry cwd override onto defaultCwd.
+func ResolveDir(defaultCwd, override string) string {
 	if override == "" {
 		return defaultCwd
 	}
 	return filepath.Join(defaultCwd, override)
 }
 
-// resolveTimeout returns the effective timeout and a flag indicating
+// ResolveTimeout returns the effective timeout and a flag indicating
 // whether the timeout should be disabled.
 //
 //   - TimeoutSet && Timeout >  0 → use the configured timeout
 //   - TimeoutSet && Timeout == 0 → disable timeout (context.Background)
 //   - !TimeoutSet                → use defaultHookTimeout (30s)
-func (*Runner) resolveTimeout(entry Entry) (time.Duration, bool) {
+func ResolveTimeout(entry Entry) (time.Duration, bool) {
 	if entry.TimeoutSet {
 		if entry.Timeout == 0 {
 			return 0, true
