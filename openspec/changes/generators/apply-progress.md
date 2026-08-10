@@ -11,21 +11,21 @@
 | 4.2 | manifest.go | — | N/A (struct) | N/A | ✅ Constants added | ➖ Structural | ✅ Clean |
 | 4.1 | scaffold_generator_test.go | Integration | ✅ scaffold 12/12 | ✅ Compile fail (GeneratePackGenerator undefined) | ✅ 7 tests pass | ✅ 7 cases | ✅ mapPromptResolver |
 | 4.3 | scaffold.go | — | N/A | N/A | ✅ 7 tests green | N/A | ✅ Clean |
-| 4.4 | cmd/generate_dispatch_test.go | Unit | ✅ cmd 8/8 | ✅ Fail (--list unknown flag) | ✅ 5 tests pass | ✅ 5 cases | ✅ Clean |
+| 4.4 | cmd/generate_dispatch_test.go | Unit | ✅ cmd 8/8 | ✅ Fail (--list unknown flag) | ✅ 5 tests pass | ✅ 5 cases (args, --list, deterministic, unknown generator) | ✅ Clean |
 | 4.5 | cmd/generate.go | — | N/A | N/A | ✅ 5 tests green | N/A | ✅ Clean |
-| 4.6 | mcp/server_generator_test.go | Integration | ✅ mcp 10/10 | ✅ Fail (no list_generators tool) | ✅ 4 tests pass | ✅ 4 cases | ✅ Clean |
+| 4.6 | mcp/server_generator_test.go | Integration | ✅ mcp 10/10 | ✅ Fail (no list_generators tool) | ✅ 3 tests pass (tools, type relaxed, unknown type - pack generator test not written in RED) | ✅ 3 cases | ✅ structured JSON |
 | 4.7 | mcp/server.go | — | N/A | N/A | ✅ 4 tests green | N/A | ✅ structured JSON |
 | 4.8 | (verify) | — | N/A | N/A | ✅ go test ./... + vet + fmt | N/A | N/A |
 
 ## Test Summary (Slice 4)
-- **Total tests written**: 16 (scaffold: 7, cmd: 5, mcp: 4)
-- **Total tests passing**: 16 + all pre-existing
-- **Layers used**: Unit (5), Integration (11)
+- **Total tests written**: 15 (scaffold: 7, cmd: 5, mcp: 3) — note: tasks 4.4/4.6 RED evidence was overstated in original report; 4.6's fixture-pack generator test was not written as standalone RED
+- **Total tests passing**: 15 + all pre-existing
+- **Layers used**: Unit (5), Integration (10)
 
 ## Cumulative Test Summary (Slices 1+2+3+4)
-- **Total tests written**: 90 (32 S1 + 23 S2 + 19 S3 + 16 S4)
-- **Total tests passing**: 90
-- **Layers used**: Unit (79), Integration (11)
+- **Total tests written**: 89 (32 S1 + 23 S2 + 19 S3 + 15 S4)
+- **Total tests passing**: 89
+- **Layers used**: Unit (79), Integration (10)
 
 ## Work Done (Slice 4)
 
@@ -139,3 +139,48 @@ gofmt -w .: clean
 
 ## Remaining Tasks
 - None — all 5 slices complete. Ready for sdd-verify and sdd-archive.
+
+---
+
+# Apply Progress: generators — Corrective Fix (Post-Verify)
+
+**Status**: success
+**Branch**: feat/generators-5 (pushed)
+**Verbatim**: fix(generators) per verify-report CRITICALs + WARNINGs
+
+## Findings Fixed
+
+| Finding | Severity | What Changed | Files |
+|---------|----------|-------------|-------|
+| CRITICAL-1 | Recipe validation not wired | Added `generators.Validate` call in manifest Load after generator decode | `packs/manifest.go`, `packs/manifest_v2_test.go` |
+| CRITICAL-2 | pack_not_installed never emitted | Added pack-not-installed check in cmd/generate.go and MCP generate_component handler | `cmd/generate.go`, `cmd/generate_dispatch_test.go`, `mcp/server.go`, `mcp/server_generator_test.go` |
+| WARNING-3 | unknown_generator flat listing | Grouped error listing by source (pack/builtin/component types) | `cmd/generate.go`, `cmd/generate_dispatch_test.go` |
+| WARNING-4 | hooks-skip warning missing | Added single warning when pre/post hooks skipped due to HooksEnabled=false | `generators/executor.go`, `generators/executor_test.go` |
+| WARNING-5 | install trust text | Updated warning to mention "hooks or generators" | `cmd/template_install.go` |
+| WARNING-6 | MCP unknown-type code | Aligned MCP unknown-type error to include `unknown_generator` code | `mcp/server.go`, `mcp/server_generator_test.go` |
+| WARNING-7 | prompt error code | Changed `missing_generator_argument` → `generator_prompt_unresolvable` in scaffold prompt resolution | `scaffold/scaffold.go` |
+| PARTIAL-8 | dual-entry spec | Amended REQ-20 spec to reflect single-entry-with-metadata refinement | `specs/generators/spec.md` |
+| PARTIAL-9 | TDD overclaim | Corrected S4 test counts and RED claims | `apply-progress.md` |
+
+## Test Evidence
+
+```
+go test ./... -count=1: 8 packages PASS (320 tests, up from 313)
+go vet ./...: clean
+gofmt -l .: clean
+```
+
+New tests (7):
+- TestManifest_Load_V2InvalidRecipe_EmptySteps_Rejected (packs)
+- TestManifest_Load_V2InvalidRecipe_UnknownStepType_Rejected (packs)
+- TestGenerate_PackNotInstalled_Error (cmd)
+- TestGenerate_PackNotInstalled_ComponentStillWorks (cmd)
+- TestGenerate_UnknownGenerator_GroupedListing (cmd)
+- TestMCPServer_GenerateComponent_PackNotInstalled (mcp)
+- TestRun_HooksEnabledFalse_SkipsPrePostHooks (generators)
+
+## Commits
+| Hash | Message |
+|------|---------|
+| (pending) | fix(generators): wire recipe validation at load and emit pack_not_installed |
+| (pending) | test(generators): production-path validation, missing pack, grouped listing, hooks warning |
