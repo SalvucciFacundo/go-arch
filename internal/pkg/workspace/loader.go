@@ -45,13 +45,9 @@ func Load(path string) (*Workspace, error) {
 			Wrapf(err, "invalid workspace file %s", path)
 	}
 
-	if len(raw.Services) == 0 {
-		return nil, oops.
-			Code("workspace_invalid").
-			Hint("Declare at least one service in the workspace file").
-			Errorf("workspace %s has no services", path)
-	}
-
+	// An empty services list is valid: workspace_list returns [] and
+	// workspace upgrade/check range over nothing (no-op, exit 0).
+	// CLI --service paths still error via service_not_found.
 	ws := &Workspace{
 		Dir:      filepath.Dir(path),
 		Services: raw.Services,

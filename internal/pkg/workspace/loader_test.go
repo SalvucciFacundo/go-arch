@@ -166,12 +166,12 @@ func TestLoad_NoServices(t *testing.T) {
 	dir := t.TempDir()
 	path := writeWorkspaceFile(t, dir, `services: []`)
 
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("Load: expected error for empty services list")
+	ws, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v — empty services list should be valid", err)
 	}
-	if code := oopsCode(err); code != "workspace_invalid" {
-		t.Errorf("code = %q, want workspace_invalid (err: %v)", code, err)
+	if ws == nil || len(ws.Services) != 0 {
+		t.Errorf("expected empty Services, got %+v", ws)
 	}
 }
 
