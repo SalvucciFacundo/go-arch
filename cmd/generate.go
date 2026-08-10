@@ -310,7 +310,7 @@ func buildUnknownGeneratorError(compType string) error {
 	var groups []string
 
 	// Always list component types.
-	groups = append(groups, fmt.Sprintf("component types: service, repository, handler, crud, page, component"))
+	groups = append(groups, "component types: service, repository, handler, crud, page, component")
 
 	// Builtin generators.
 	if len(generators.BuiltinRegistry) > 0 {
