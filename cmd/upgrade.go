@@ -150,6 +150,8 @@ func configFromViper(projectName string) *ui.ProjectConfig {
 
 func ansiSuccess() string { return "SUCCESS:" }
 func ansiWarning() string { return "WARNING:" }
+func ansiError() string   { return "ERROR:" }
+func ansiInfo() string    { return "INFO:" }
 
 // ──────────────────────────────────────────────────────────
 // displayPlan prints the upgrade plan grouped by classification.
