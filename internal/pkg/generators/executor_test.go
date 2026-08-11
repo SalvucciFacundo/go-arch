@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"go-arch/internal/pkg/hooks"
-	"go-arch/internal/pkg/template"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/hooks"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/template"
 )
 
 // --------------- Test Fakes ---------------

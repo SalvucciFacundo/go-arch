@@ -7,8 +7,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"go-arch/internal/pkg/scaffold"
-	"go-arch/internal/pkg/workspace"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/scaffold"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/workspace"
 )
 
 // workspaceUpgradeCmd upgrades every service in the workspace in order.

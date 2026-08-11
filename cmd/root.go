@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 	"os"
 
 	"github.com/samber/oops"

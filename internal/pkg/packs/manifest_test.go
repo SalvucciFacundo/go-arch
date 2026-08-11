@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/hooks"
 	"github.com/samber/oops"
-	"go-arch/internal/pkg/hooks"
 )
 
 func TestManifest_Load_ValidMinimal(t *testing.T) {

@@ -2,8 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"go-arch/internal/pkg/validator"
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/validator"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 
 	"github.com/samber/oops"
 	"github.com/spf13/cobra"

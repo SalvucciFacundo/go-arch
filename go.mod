@@ -1,4 +1,4 @@
-module go-arch
+module github.com/SalvucciFacundo/go-arch/v2
 
 go 1.24.0
 

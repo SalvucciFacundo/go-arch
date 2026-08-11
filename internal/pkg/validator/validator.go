@@ -2,7 +2,7 @@ package validator
 
 import (
 	"fmt"
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 	"go/ast"
 	"go/parser"
 	"go/token"

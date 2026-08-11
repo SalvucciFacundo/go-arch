@@ -2,8 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"go-arch/internal/pkg/scaffold"
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/scaffold"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 	"io"
 	"os"
 	"path/filepath"

@@ -1,6 +1,6 @@
 package scaffold
 
-import "go-arch/internal/pkg/packs"
+import "github.com/SalvucciFacundo/go-arch/v2/internal/pkg/packs"
 
 // Resolver locates an installed pack by name and version.
 // Tests inject a fake resolver that returns synthetic PackInfo

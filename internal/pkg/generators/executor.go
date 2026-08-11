@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/hooks"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/template"
 	"github.com/samber/oops"
-	"go-arch/internal/pkg/hooks"
-	"go-arch/internal/pkg/template"
 )
 
 // entriesFirer is the seam interface for executing run: steps and

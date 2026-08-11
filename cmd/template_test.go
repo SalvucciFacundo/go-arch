@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"bytes"
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 	"os"
 	"path/filepath"
 	"strings"

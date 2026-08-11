@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"go-arch/internal/pkg/packs"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/packs"
 )
 
 // makeFakePackDir creates a minimal valid pack module tree on disk:

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"go-arch/internal/pkg/generators"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/generators"
 )
 
 // --- Contract v2 + generators tests (Slice 1) ---

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"go-arch/internal/pkg/hooks"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/hooks"
 )
 
 // TestFireEntries_ObjectFormArgv verifies that an object-form entry

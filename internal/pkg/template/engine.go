@@ -10,7 +10,7 @@ import (
 	"text/template"
 	"time"
 
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 
 	"github.com/jinzhu/inflection"
 	"github.com/samber/oops"

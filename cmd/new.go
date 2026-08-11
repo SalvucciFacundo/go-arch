@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"go-arch/internal/pkg/hooks"
-	"go-arch/internal/pkg/packs"
-	"go-arch/internal/pkg/scaffold"
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/hooks"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/packs"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/scaffold"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 	"os"
 	"path/filepath"
 

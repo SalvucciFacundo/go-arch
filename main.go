@@ -1,8 +1,8 @@
 package main
 
 import (
-	"go-arch/cmd"
-	"go-arch/internal/pkg/mcp"
+	"github.com/SalvucciFacundo/go-arch/v2/cmd"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/mcp"
 )
 
 func main() {

@@ -9,8 +9,8 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/hooks"
 	"github.com/samber/oops"
-	"go-arch/internal/pkg/hooks"
 )
 
 // Runner executes run: steps and generator hooks via the hooks.CommandRunner

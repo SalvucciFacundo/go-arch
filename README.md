@@ -74,7 +74,7 @@ Download the latest pre-compiled binaries from the [Releases](https://github.com
 
 ### 🛠️ Manual Build (Any OS)
 ```bash
-go install github.com/SalvucciFacundo/go-arch@latest
+go install github.com/SalvucciFacundo/go-arch/v2@latest
 ```
 
 ## 📐 Usage Guide

@@ -1,7 +1,7 @@
 package validator
 
 import (
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 	"go/ast"
 	"os"
 	"testing"

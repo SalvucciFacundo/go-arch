@@ -3,8 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"go-arch/internal/pkg/packs"
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/packs"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/samber/oops"

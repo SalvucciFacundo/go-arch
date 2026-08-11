@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"go-arch/internal/pkg/workspace"
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/workspace"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 )
 
 // workspaceCmd is the parent command for workspace operations.

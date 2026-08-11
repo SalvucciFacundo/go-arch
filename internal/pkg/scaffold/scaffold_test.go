@@ -2,9 +2,9 @@ package scaffold
 
 import (
 	"bytes"
-	"go-arch/internal/pkg/hooks"
-	"go-arch/internal/pkg/template"
-	"go-arch/internal/ui"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/hooks"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/template"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/ui"
 	"os"
 	"os/exec"
 	"path/filepath"

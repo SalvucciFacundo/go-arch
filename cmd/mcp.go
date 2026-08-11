@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"go-arch/internal/pkg/mcp"
+	"github.com/SalvucciFacundo/go-arch/v2/internal/pkg/mcp"
 
 	"github.com/spf13/cobra"
 )
