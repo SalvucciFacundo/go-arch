@@ -3,9 +3,9 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Cache dependencies (go.sum committed; if absent, comment the second COPY)
-COPY go.mod ./
-COPY go.sum ./
+# Cache dependencies. go.sum may not exist on a fresh scaffold (it appears
+# after the first `go mod tidy`), so the * glob makes the COPY a no-op then.
+COPY go.mod go.sum* ./
 RUN go mod download
 
 # Copy source code

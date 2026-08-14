@@ -354,6 +354,7 @@ func TestScaffolder_FlagONWebFiles(t *testing.T) {
 				"static/css/style.css",
 				"static/js/htmx.min.js",
 				"internal/handler/page.go",
+				"tools.go",
 				"README.md",
 			}
 			for _, f := range webFiles {

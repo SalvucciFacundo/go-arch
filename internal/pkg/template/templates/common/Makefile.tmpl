@@ -1,11 +1,20 @@
 # Makefile for the {{ .ProjectName }} microservice
 
-.PHONY: proto help
+.PHONY: proto templ help
 
 # Help
 help:
 	@echo "Available commands:"
 	@echo "  make proto    - Generate Go code from .proto files"
+{{ if .UseTemplHTMX }}
+	@echo "  make templ    - Regenerate templ code with the pinned CLI version"
+
+# templ code generation
+# Pins the CLI to the version in go.mod — mismatched CLI versions produce
+# incompatible _templ.go files.
+templ:
+	go run github.com/a-h/templ/cmd/templ@v0.3.906 generate
+{{ end }}
 
 # gRPC code generation
 # Requirements: protoc, protoc-gen-go, protoc-gen-go-grpc

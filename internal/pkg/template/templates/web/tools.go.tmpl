@@ -1,0 +1,12 @@
+//go:build tools
+
+// Tool dependencies pinned to the versions in go.mod.
+// This file is never compiled into the binary; it exists so `go mod` tracks
+// the exact CLI version used to generate code.
+//
+// Regenerate with: go run github.com/a-h/templ/cmd/templ@v0.3.906 generate
+package tools
+
+import (
+	_ "github.com/a-h/templ/cmd/templ"
+)

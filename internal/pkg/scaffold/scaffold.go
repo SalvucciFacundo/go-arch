@@ -267,6 +267,7 @@ func (s *Scaffolder) scaffoldWeb() error {
 		{"views/components/counter.templ", "web/component.templ.tmpl"},
 		{"static/css/style.css", "web/style.css.tmpl"},
 		{"internal/handler/page.go", "web/handler.tmpl"},
+		{"tools.go", "web/tools.go.tmpl"},
 		{"README.md", "web/readme.tmpl"},
 	}
 	for _, v := range views {
