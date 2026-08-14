@@ -18,6 +18,7 @@ type ProjectConfig struct {
 	UseTemplHTMX         bool   `mapstructure:"use_templ_htmx"`
 	Template             string `mapstructure:"template,omitempty"`
 	GoArchVersion        string `mapstructure:"go_arch_version"`
+	ScaffoldProdV1       bool   `mapstructure:"scaffold_prod_v1"`
 }
 
 func RunWizard() (*ProjectConfig, error) {

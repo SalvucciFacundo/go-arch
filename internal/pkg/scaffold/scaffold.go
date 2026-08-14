@@ -358,6 +358,11 @@ func (s *Scaffolder) createCommonFiles() error {
 		return err
 	}
 
+	// Typed runtime config (scaffold-prod v1)
+	if err := s.createFile("internal/config/config.go", "common/config_go.tmpl", nil); err != nil {
+		return err
+	}
+
 	// .env.example (committed template; real .env is gitignored)
 	if err := s.createFile(".env.example", "common/env.tmpl", nil); err != nil {
 		return err
