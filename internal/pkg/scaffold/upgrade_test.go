@@ -89,7 +89,7 @@ func TestUpgrade_ClassUpgradable(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env")
+	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env.example.example")
 
 	// Create local template override that differs from embedded
 	localDir := filepath.Join(".go-arch", "templates", "common")
@@ -112,8 +112,8 @@ func TestUpgrade_ClassUpgradable(t *testing.T) {
 	}
 
 	f := plan.Files[0]
-	if f.Path != ".env" {
-		t.Errorf("path = %q, want .env", f.Path)
+	if f.Path != ".env.example.example" {
+		t.Errorf("path = %q, want .env.example", f.Path)
 	}
 	if f.Classification != ClassUpgradable {
 		t.Errorf("classification = %q, want upgradable", f.Classification)
@@ -133,11 +133,11 @@ func TestUpgrade_ClassProtected(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	cfg, origBytes := setupTestProject(t, "common/env.tmpl", ".env")
+	cfg, origBytes := setupTestProject(t, "common/env.tmpl", ".env.example.example")
 
 	// Modify the file on disk (simulate user edit)
 	modified := append([]byte("# USER EDIT\n"), origBytes...)
-	if err := os.WriteFile(".env", modified, 0644); err != nil {
+	if err := os.WriteFile(".env.example.example", modified, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -166,7 +166,7 @@ func TestUpgrade_ClassProtected(t *testing.T) {
 	}
 
 	// Disk content must be unchanged
-	diskAfter, _ := os.ReadFile(".env")
+	diskAfter, _ := os.ReadFile(".env.example.example")
 	if !bytes.Equal(diskAfter, modified) {
 		t.Error("protected file was modified by Apply()")
 	}
@@ -182,10 +182,10 @@ func TestUpgrade_ClassAbsent(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env")
+	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env.example.example")
 
 	// Delete the file
-	if err := os.Remove(".env"); err != nil {
+	if err := os.Remove(".env.example.example"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -215,7 +215,7 @@ func TestUpgrade_ClassUpToDate(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env")
+	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env.example.example")
 
 	plan, err := Upgrade(cfg)
 	if err != nil {
@@ -246,7 +246,7 @@ func TestUpgrade_GoArchYAMLExcluded(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env")
+	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env.example.example")
 
 	// Add .go-arch.yaml to manifest with a deliberately wrong hash
 	fakeHash := hashBytesForTest([]byte("wrong content"))
@@ -346,7 +346,7 @@ func TestUpgrade_Apply_CompareThenWrite(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env")
+	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env.example.example")
 
 	// Override template to get upgradable
 	localDir := filepath.Join(".go-arch", "templates", "common")
@@ -364,14 +364,14 @@ func TestUpgrade_Apply_CompareThenWrite(t *testing.T) {
 	}
 
 	// Disk should now match v2
-	diskAfter, _ := os.ReadFile(".env")
+	diskAfter, _ := os.ReadFile(".env.example.example")
 	if !bytes.Equal(diskAfter, []byte(v2Content)) {
 		t.Errorf("disk content after apply:\n%s\n\nwant:\n%s", diskAfter, v2Content)
 	}
 
 	// Manifest entry should be refreshed
 	m, _ := LoadManifest(".")
-	entry := m.Files[".env"]
+	entry := m.Files[".env.example.example"]
 	expectedHash := hashBytesForTest([]byte(v2Content))
 	if entry.SHA256 != expectedHash {
 		t.Errorf("manifest hash after apply = %q, want %q", entry.SHA256, expectedHash)
@@ -388,7 +388,7 @@ func TestUpgrade_Apply_Idempotent(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env")
+	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env.example.example")
 
 	// Override template → upgradable
 	localDir := filepath.Join(".go-arch", "templates", "common")
@@ -431,17 +431,17 @@ func TestUpgrade_Apply_CountMatches(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env")
+	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env.example.example")
 
 	// Add a second entry to the manifest
 	engine := template.NewEngine()
 	var buf2 bytes.Buffer
 	engine.RenderTo(&buf2, "common/env.tmpl", cfg, true)
 
-	os.WriteFile(".env2", buf2.Bytes(), 0644)
+	os.WriteFile(".env.example2", buf2.Bytes(), 0644)
 	m, _ := LoadManifest(".")
 	m.Upsert(ManifestEntry{
-		Path:         ".env2",
+		Path:         ".env.example2",
 		SHA256:       hashBytesForTest(buf2.Bytes()),
 		Origin:       OriginScaffold,
 		TemplatePath: "common/env.tmpl",
@@ -690,11 +690,11 @@ func TestLegacyUpgrade_GoModReportOnly(t *testing.T) {
 	goModContent := []byte("module github.com/test/legacy2\n\ngo 1.23\n")
 	os.WriteFile("go.mod", goModContent, 0644)
 
-	// Also write a .env so the plan has at least one file
+	// Also write a .env.example so the plan has at least one file
 	engine := template.NewEngine()
 	var envBuf bytes.Buffer
 	engine.RenderTo(&envBuf, "common/env.tmpl", cfg, true)
-	os.WriteFile(".env", envBuf.Bytes(), 0644)
+	os.WriteFile(".env.example.example", envBuf.Bytes(), 0644)
 
 	plan, err := Upgrade(cfg)
 	if err != nil {
@@ -1233,7 +1233,7 @@ func TestUpgrade_PackSource_RerendersFromPack(t *testing.T) {
 	v1Hash := hashBytesForTest(v1Content)
 
 	// Write V1 to disk.
-	if err := os.WriteFile(".env", v1Content, 0644); err != nil {
+	if err := os.WriteFile(".env.example.example", v1Content, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1254,8 +1254,8 @@ func TestUpgrade_PackSource_RerendersFromPack(t *testing.T) {
 	m := &Manifest{
 		Version: 1,
 		Files: map[string]ManifestEntry{
-			".env": {
-				Path:         ".env",
+			".env.example.example": {
+				Path:         ".env.example.example",
 				SHA256:       v1Hash,
 				Origin:       OriginScaffold,
 				TemplatePath: "common/env.tmpl",
@@ -1289,8 +1289,8 @@ func TestUpgrade_PackSource_RerendersFromPack(t *testing.T) {
 	}
 
 	f := plan.Files[0]
-	if f.Path != ".env" {
-		t.Errorf("path = %q, want .env", f.Path)
+	if f.Path != ".env.example.example" {
+		t.Errorf("path = %q, want .env.example", f.Path)
 	}
 	if f.Classification != ClassUpgradable {
 		t.Errorf("classification = %q, want upgradable", f.Classification)
@@ -1309,7 +1309,7 @@ func TestUpgrade_PackSource_RerendersFromPack(t *testing.T) {
 	}
 
 	// Disk must now contain pack V2 content.
-	diskAfter, _ := os.ReadFile(".env")
+	diskAfter, _ := os.ReadFile(".env.example.example")
 	rendered := string(diskAfter)
 	if !strings.Contains(rendered, "PACK V2") {
 		t.Errorf("disk content after apply does not come from pack:\n%s", rendered)
@@ -1334,7 +1334,7 @@ func TestUpgrade_PackSource_MissingPackProtected(t *testing.T) {
 
 	// Write some content on disk.
 	diskContent := []byte("# DISK CONTENT\nDB_HOST=localhost\n")
-	if err := os.WriteFile(".env", diskContent, 0644); err != nil {
+	if err := os.WriteFile(".env.example.example", diskContent, 0644); err != nil {
 		t.Fatal(err)
 	}
 	diskHash := hashBytesForTest(diskContent)
@@ -1342,8 +1342,8 @@ func TestUpgrade_PackSource_MissingPackProtected(t *testing.T) {
 	m := &Manifest{
 		Version: 1,
 		Files: map[string]ManifestEntry{
-			".env": {
-				Path:         ".env",
+			".env.example.example": {
+				Path:         ".env.example.example",
 				SHA256:       diskHash,
 				Origin:       OriginScaffold,
 				TemplatePath: "common/env.tmpl",
@@ -1385,8 +1385,8 @@ func TestUpgrade_PackSource_MissingPackProtected(t *testing.T) {
 	if f.Classification != ClassProtected {
 		t.Errorf("classification = %q, want protected", f.Classification)
 	}
-	if f.Path != ".env" {
-		t.Errorf("path = %q, want .env", f.Path)
+	if f.Path != ".env.example.example" {
+		t.Errorf("path = %q, want .env.example", f.Path)
 	}
 
 	// Warning must mention the pack name and version.
@@ -1416,7 +1416,7 @@ func TestUpgrade_PackSource_VersionBumpProtected(t *testing.T) {
 	}
 
 	diskContent := []byte("# DISK V1\n")
-	if err := os.WriteFile(".env", diskContent, 0644); err != nil {
+	if err := os.WriteFile(".env.example.example", diskContent, 0644); err != nil {
 		t.Fatal(err)
 	}
 	diskHash := hashBytesForTest(diskContent)
@@ -1424,8 +1424,8 @@ func TestUpgrade_PackSource_VersionBumpProtected(t *testing.T) {
 	m := &Manifest{
 		Version: 1,
 		Files: map[string]ManifestEntry{
-			".env": {
-				Path:         ".env",
+			".env.example.example": {
+				Path:         ".env.example.example",
 				SHA256:       diskHash,
 				Origin:       OriginScaffold,
 				TemplatePath: "common/env.tmpl",
@@ -1493,7 +1493,7 @@ func TestUpgrade_PackSource_NonPackEntriesUnchanged(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env")
+	cfg, _ := setupTestProject(t, "common/env.tmpl", ".env.example.example")
 
 	// Create local template override to trigger upgradable
 	localDir := filepath.Join(".go-arch", "templates", "common")
@@ -1725,7 +1725,7 @@ func TestUpgrade_TemplateOriginWithGeneratorMetadata_Upgradable(t *testing.T) {
 	v1Content := v1Buf.Bytes()
 	v1Hash := hashBytesForTest(v1Content)
 
-	if err := os.WriteFile(".env", v1Content, 0644); err != nil {
+	if err := os.WriteFile(".env.example.example", v1Content, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1745,8 +1745,8 @@ func TestUpgrade_TemplateOriginWithGeneratorMetadata_Upgradable(t *testing.T) {
 	m := &Manifest{
 		Version: 1,
 		Files: map[string]ManifestEntry{
-			".env": {
-				Path:         ".env",
+			".env.example.example": {
+				Path:         ".env.example.example",
 				SHA256:       v1Hash,
 				Origin:       OriginTemplate,
 				TemplatePath: "common/env.tmpl",
@@ -1784,8 +1784,8 @@ func TestUpgrade_TemplateOriginWithGeneratorMetadata_Upgradable(t *testing.T) {
 	}
 
 	f := plan.Files[0]
-	if f.Path != ".env" {
-		t.Errorf("path = %q, want .env", f.Path)
+	if f.Path != ".env.example.example" {
+		t.Errorf("path = %q, want .env.example", f.Path)
 	}
 	if f.Classification != ClassUpgradable {
 		t.Errorf("classification = %q, want upgradable", f.Classification)
@@ -1803,7 +1803,7 @@ func TestUpgrade_TemplateOriginWithGeneratorMetadata_Upgradable(t *testing.T) {
 		t.Errorf("applied count = %d, want 1", applied)
 	}
 
-	diskAfter, _ := os.ReadFile(".env")
+	diskAfter, _ := os.ReadFile(".env.example.example")
 	rendered := string(diskAfter)
 	if !strings.Contains(rendered, "PACK V2 ENV FROM GENERATOR") {
 		t.Errorf("disk content after apply does not come from pack:\n%s", rendered)

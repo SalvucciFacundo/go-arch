@@ -357,8 +357,13 @@ func (s *Scaffolder) createCommonFiles() error {
 		return err
 	}
 
-	// .env (Always useful)
-	if err := s.createFile(".env", "common/env.tmpl", nil); err != nil {
+	// .env.example (committed template; real .env is gitignored)
+	if err := s.createFile(".env.example", "common/env.tmpl", nil); err != nil {
+		return err
+	}
+
+	// .gitignore (excludes .env and build artifacts)
+	if err := s.createFile(".gitignore", "common/gitignore.tmpl", nil); err != nil {
 		return err
 	}
 

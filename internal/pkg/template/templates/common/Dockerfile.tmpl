@@ -1,14 +1,11 @@
 # Stage 1: Build
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
+# Cache dependencies (go.sum committed; if absent, comment the second COPY)
 COPY go.mod ./
-{{ if .UseDocker }}
-# If you have a go.sum, uncomment this:
-# COPY go.sum ./
-{{ end }}
+COPY go.sum ./
 RUN go mod download
 
 # Copy source code
@@ -19,16 +16,22 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/api/main.go
 
 # Stage 2: Runtime
-FROM alpine:latest
+FROM alpine:3.20
 
-WORKDIR /root/
+# Non-root user (fixes static file permission issues under /root, which is 0700)
+RUN addgroup -S app && adduser -S app -G app
+WORKDIR /app
+RUN chown -R app:app /app
 
-# Copy the binary from the builder stage
+# Copy the binary and any runtime assets (static/, views/ are embedded or served from disk)
 COPY --from=builder /app/main .
-COPY --from=builder /app/.env .
+{{ if .UseTemplHTMX }}
+COPY --from=builder --chown=app:app /app/static ./static
+{{ end }}
 
-# Expose the application port
+# Expose the application port (override with SERVER_PORT at runtime if needed)
 EXPOSE 8080
 
-# Run the binary
+USER app
+
 CMD ["./main"]

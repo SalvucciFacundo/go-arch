@@ -2,26 +2,50 @@ services:
   api:
     build: .
     ports:
-      - "8080:8080"
+      - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
     env_file:
       - .env
-    volumes:
-      - .:/app
+    environment:
+      # Compose-injected values for the API container; override in .env
+      SERVER_PORT: ${SERVER_PORT:-8080}
+{{ if ne .DBDriver "None" }}
+      DATABASE_URL: postgres://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/{{ .ProjectName | lower }}
+    depends_on:
+      db:
+        condition: service_healthy
+{{ end }}
+    restart: unless-stopped
+
 {{ if ne .DBDriver "None" }}
   db:
   {{ if eq .DBDriver "PostgreSQL" }}
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
       POSTGRES_DB: {{ .ProjectName | lower }}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d {{ .ProjectName | lower }}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   {{ else if eq .DBDriver "MySQL" }}
     image: mysql:8
     environment:
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: {{ .ProjectName | lower }}
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   {{ else if eq .DBDriver "MongoDB" }}
-    image: mongo:6
+    image: mongo:7
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   {{ end }}
     ports:
     {{ if eq .DBDriver "PostgreSQL" }}
@@ -31,7 +55,11 @@ services:
     {{ else if eq .DBDriver "MongoDB" }}
       - "27017:27017"
     {{ end }}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    restart: unless-stopped
 {{ end }}
+
 {{ if .UseObservability }}
 {{ if eq .ObservabilityBackend "Jaeger" }}
   jaeger:
@@ -46,3 +74,6 @@ services:
       - "9411:9411"
 {{ end }}
 {{ end }}
+
+volumes:
+  db-data:
