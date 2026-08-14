@@ -49,6 +49,9 @@ func WithPackInfo(p packs.PackInfo) ScaffoldOption {
 }
 
 func NewScaffolder(config *ui.ProjectConfig, opts ...ScaffoldOption) *Scaffolder {
+	// scaffold-prod v1 is the default for new scaffolds — it drives the
+	// subcommand dispatch + typed config in the generated mains.
+	config.ScaffoldProdV1 = true
 	s := &Scaffolder{config: config}
 
 	// Apply options first so packInfo is known before engine construction.

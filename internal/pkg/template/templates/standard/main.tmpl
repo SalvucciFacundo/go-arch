@@ -1,11 +1,15 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
-	"{{ .ModuleName }}/internal/handler"
+
+	"{{ .ModuleName }}/internal/config"
+	{{ if .ScaffoldProdV1 }}
+	"os"
+	{{ end }}
 	{{ if .UseObservability }}
+	"context"
 	"{{ .ModuleName }}/internal/telemetry"
 	{{ end }}
 	{{ if .UseGRPC }}
@@ -13,7 +17,35 @@ import (
 	{{ end }}
 )
 
+{{ if .ScaffoldProdV1 }}
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "server":
+			runServer()
+			return
+		case "migrate":
+			if err := runMigrate(); err != nil {
+				log.Fatalf("migrate: %v", err)
+			}
+			return
+		case "version":
+			fmt.Println("{{ .ProjectName }} dev")
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "unknown subcommand %q\nusage: %s [server|migrate|version]\n", os.Args[1], os.Args[0])
+			os.Exit(2)
+		}
+	}
+	runServer()
+}
+{{ else }}
+func main() {
+	runServer()
+}
+{{ end }}
+
+func runServer() {
 	fmt.Println("Starting Standard project: {{ .ProjectName }}")
 
 	{{ if .UseObservability }}
@@ -33,10 +65,24 @@ func main() {
 		}
 	}()
 	{{ end }}
-	
+
+	_, _ = config.Load()
+
 	// Handler logic here
 	// Keep the main process alive
 	{{ if .UseGRPC }}
 	select {}
 	{{ end }}
 }
+
+{{ if .ScaffoldProdV1 }}
+{{ if or (eq .DBDriver "PostgreSQL") (eq .DBDriver "MySQL") }}
+func runMigrate() error {
+	return fmt.Errorf("migrate: not wired yet (dbmigrate is generated with the scaffold)")
+}
+{{ else }}
+func runMigrate() error {
+	return fmt.Errorf("migrations are not supported for this project")
+}
+{{ end }}
+{{ end }}
