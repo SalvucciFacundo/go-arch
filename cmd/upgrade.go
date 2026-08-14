@@ -159,6 +159,7 @@ func configFromViper(projectName string) *ui.ProjectConfig {
 		ObservabilityBackend: viper.GetString("observability_backend"),
 		UseGRPC:              viper.GetBool("use_grpc"),
 		UseTemplHTMX:         viper.GetBool("use_templ_htmx"),
+		ScaffoldProdV1:       viper.GetBool("scaffold_prod_v1"),
 	}
 }
 

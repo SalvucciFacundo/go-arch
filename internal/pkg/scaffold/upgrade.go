@@ -36,7 +36,8 @@ type FileAction struct {
 	ManifestHash   string         `json:"manifestHash,omitempty"`
 	DiskHash       string         `json:"diskHash,omitempty"`
 	RerenderHash   string         `json:"rerenderHash,omitempty"`
-	RerenderBytes  []byte         `json:"-"` // held for apply; not serialized
+	RerenderBytes  []byte         `json:"-"`                      // held for apply; not serialized
+	TemplatePath   string         `json:"templatePath,omitempty"` // seed for newly created entries
 }
 
 // UpgradePlan is the full classified plan.
@@ -272,7 +273,49 @@ func Upgrade(cfg *ui.ProjectConfig, opts ...UpgradeOption) (*UpgradePlan, error)
 		}
 	}
 
+	// Post-loop: inject scaffold-prod v1 packages into marker'd projects.
+	// When a re-rendered main imports internal/config or internal/dbmigrate
+	// and the package is absent on disk, render+write it so the upgraded
+	// project compiles. Only runs for projects carrying the marker (their
+	// go.mod already has the driver pins).
+	if cfg.ScaffoldProdV1 {
+		injectables := []struct{ path, tmpl string }{
+			{"internal/config/config.go", "common/config_go.tmpl"},
+		}
+		if cfg.DBDriver == "PostgreSQL" || cfg.DBDriver == "MySQL" {
+			injectables = append(injectables,
+				struct{ path, tmpl string }{"internal/dbmigrate/migrate.go", "common/dbmigrate_go.tmpl"},
+				struct{ path, tmpl string }{"internal/dbmigrate/migrations/0001_init.sql", "common/migration_sql.tmpl"},
+			)
+		}
+		for _, inj := range injectables {
+			if _, err := os.Stat(filepath.Join(root, inj.path)); os.IsNotExist(err) {
+				rerender, rerenderErr := renderInjectedPackage(engine, cfg, inj.tmpl)
+				if rerenderErr == nil {
+					plan.Files = append(plan.Files, FileAction{
+						Path:           inj.path,
+						Classification: ClassUpgradable,
+						RerenderHash:   hashBytes(rerender),
+						RerenderBytes:  rerender,
+						TemplatePath:   inj.tmpl,
+					})
+				}
+			}
+		}
+	}
+
 	return plan, nil
+}
+
+// renderInjectedPackage renders a scaffold-prod package file for upgrade
+// injection. Follows renderRoutesRegistry (engine.RenderTo), NOT renderEntry
+// (which needs a ManifestEntry and routes special-casing).
+func renderInjectedPackage(engine *template.Engine, cfg *ui.ProjectConfig, tmpl string) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := engine.RenderTo(&buf, tmpl, cfg, true); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // renderRoutesRegistry renders internal/router/routes.go from the manifest
@@ -415,11 +458,15 @@ func (p *UpgradePlan) Apply() (int, error) {
 		newHash := hashBytes(f.RerenderBytes)
 		entry := m.Files[f.Path]
 		entry.SHA256 = newHash
-		// Newly created files (e.g. routes.go from a pre-change project) have
-		// no manifest entry yet — seed the template + origin so the next
-		// upgrade re-renders them correctly.
+		// Newly created files (e.g. routes.go from a pre-change project, or
+		// injected scaffold-prod packages) have no manifest entry yet — seed
+		// the template + origin so the next upgrade re-renders them correctly.
 		if entry.TemplatePath == "" {
-			entry.TemplatePath = "common/routes.tmpl"
+			if f.TemplatePath != "" {
+				entry.TemplatePath = f.TemplatePath
+			} else {
+				entry.TemplatePath = "common/routes.tmpl"
+			}
 			entry.Origin = OriginScaffold
 		}
 		m.Files[f.Path] = entry
