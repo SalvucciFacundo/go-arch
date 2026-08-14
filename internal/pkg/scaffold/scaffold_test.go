@@ -803,6 +803,7 @@ func TestManifest_NewRecordsScaffoldEntries(t *testing.T) {
 		".go-arch.yaml",
 		".env.example",
 		".gitignore",
+		"internal/config/config.go",
 		"static/js/htmx.min.js",
 	}
 	for _, f := range expectedFiles {
