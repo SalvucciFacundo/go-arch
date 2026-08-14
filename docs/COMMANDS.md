@@ -26,6 +26,20 @@ The main entry point for scaffolding. It triggers an interactive wizard.
 - **Telemetry**: Optional integration of **OpenTelemetry** with support for multiple backends (Jaeger, Zipkin, SigNoz, etc.).
 - **gRPC Support**: Scaffolds a complete **gRPC server** including `.proto` contracts and automation through a **Makefile**.
 
+### Generated project runtime
+
+Since `scaffold_prod_v1`, every generated project runs as a small stdlib CLI:
+
+```bash
+./main             # start the HTTP server (same as ./main server)
+./main server      # explicit server start
+./main migrate     # apply pending DB migrations (PostgreSQL/MySQL only)
+./main version     # print version
+./main whatever    # unknown subcommand → usage + exit 2
+```
+
+Typed runtime configuration lives in `internal/config` (reads `SERVER_PORT`, `APP_ENV`, `DATABASE_URL`); migrations live in `internal/dbmigrate` (embedded SQL, idempotent).
+
 ---
 
 ## 3. `generate` (or `g`) 🧬

@@ -151,6 +151,33 @@ graph TD
 
 ---
 
+## 🏭 Production-Ready Scaffolding (scaffold-prod v1)
+
+Every project generated since `scaffold_prod_v1` ships three production-oriented pieces:
+
+### Typed Config (`internal/config/`)
+- `config.Load()` reads `SERVER_PORT` (default `8080`), `APP_ENV` (default `development`), and `DATABASE_URL` from the environment.
+- With a database driver selected, `Load()` **fails fast** when `DATABASE_URL` is missing, pointing to `.env.example`.
+- stdlib only — no viper in the generated project.
+
+### Subcommand Main
+Generated mains dispatch on `os.Args[1]` (stdlib switch):
+- no argument / `server` — runs the HTTP server (preserves the Dockerfile `CMD ["./main"]`)
+- `migrate` — applies pending database migrations (relational projects only)
+- `version` — prints a version string
+- unknown — prints usage and exits `2`
+
+### Migrations Runner (`internal/dbmigrate/`)
+- Generated for PostgreSQL and MySQL projects (not MongoDB, not DB-less).
+- SQL migrations are embedded via `//go:embed migrations/*.sql` and applied in filename order inside transactions.
+- `schema_migrations` tracks applied versions — re-running is idempotent.
+- The runner pins the driver (`pgx/v5` for PostgreSQL, `go-sql-driver/mysql` for MySQL) in `go.mod`.
+
+### Upgrade Injection
+The `scaffold_prod_v1: true` marker in `.go-arch.yaml` gates upgrade behavior: projects that lose their `internal/config` or `internal/dbmigrate` packages get them re-injected during `go-arch upgrade` so the re-rendered main compiles. Projects without the marker keep their legacy mains untouched.
+
+---
+
 ## 🛠️ Internal CLI Architecture
 
 The CLI itself is built following the **Screaming Architecture** pattern:

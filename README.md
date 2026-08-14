@@ -28,7 +28,8 @@
 - 🔄 **Lifecycle Hooks**: `pre-new` / `post-new` / `pre-generate` / `post-generate` so generated projects run their own tooling (format, install deps, init git).
 - 🗂️ **Multi-Project Workspaces**: `go-arch.workspace.yaml` + `workspace upgrade`/`check` and `--service` to operate across a monorepo.
 - ⬆️ **Project Evolution**: `go-arch upgrade` propagates template changes via a fingerprint manifest without clobbering user edits.
-- 🐚 **Infrastructure Ready**: Optional **Docker** & **Docker Compose** generation for the app and DB.
+- 🏭 **Production-Ready Scaffolding**: typed `internal/config`, subcommand-aware `main` (`server`/`migrate`/`version`), and a zero-dep SQL migrations runner for PostgreSQL/MySQL.
+- 🐚 **Infrastructure Ready**: Optional **Docker** & **Docker Compose** generation for the app and DB (healthchecks, non-root, driver-correct URLs/volumes).
 - 🧪 **QA & TDD Oriented**: Automatic test file generation with manual mocking patterns.
 - 🎨 **Deep Customization**: High-level template system (Global/Local/Pack) to override any generated code.
 - 🧠 **Smart Pluralization**: Linguistically aware generation (e.g., `Category` -> `Categories`).
