@@ -17,12 +17,14 @@ func TestEngine_Render(t *testing.T) {
 	data := struct {
 		ProjectName      string
 		ModuleName       string
+		DBDriver         string
 		UseObservability bool
 		UseGRPC          bool
 		UseTemplHTMX     bool
 	}{
 		ProjectName:      "TestApp",
 		ModuleName:       "github.com/test/app",
+		DBDriver:         "None",
 		UseObservability: true,
 		UseGRPC:          true,
 		UseTemplHTMX:     false,

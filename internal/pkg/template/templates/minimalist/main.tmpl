@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"{{ .ModuleName }}/internal/config"
+	{{ if or (eq .DBDriver "PostgreSQL") (eq .DBDriver "MySQL") }}"{{ .ModuleName }}/internal/dbmigrate"{{ end }}
 	{{ if .ScaffoldProdV1 }}
 	"os"
 	{{ end }}
@@ -58,7 +59,11 @@ func runServer() {
 {{ if .ScaffoldProdV1 }}
 {{ if or (eq .DBDriver "PostgreSQL") (eq .DBDriver "MySQL") }}
 func runMigrate() error {
-	return fmt.Errorf("migrate: not wired yet (dbmigrate is generated with the scaffold)")
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return dbmigrate.Up({{ if eq .DBDriver "PostgreSQL" }}"pgx"{{ else }}"mysql"{{ end }}, cfg.DatabaseURL)
 }
 {{ else }}
 func runMigrate() error {
