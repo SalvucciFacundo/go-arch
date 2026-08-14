@@ -11,9 +11,9 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the binary
+# Build the binary (path differs by architecture: Minimalist uses main.go)
 # CGO_ENABLED=0 is critical for running in a scratch/alpine image
-RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/api/main.go
+{{ if eq .Architecture "Minimalist" }}RUN CGO_ENABLED=0 GOOS=linux go build -o main ./main.go{{ else }}RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/api/main.go{{ end }}
 
 # Stage 2: Runtime
 FROM alpine:3.20

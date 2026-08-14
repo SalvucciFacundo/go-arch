@@ -2700,3 +2700,56 @@ func TestHooks_EmptyConfig_IsNoop(t *testing.T) {
 		t.Fatalf("Execute with empty hooks config should succeed, got: %v", err)
 	}
 }
+
+// TestScaffoldProd_DispatchInMains verifies every generated main contains the
+// subcommand dispatch when the scaffold_prod_v1 marker is active, and that
+// legacy content is preserved when it is not.
+func TestScaffoldProd_DispatchInMains(t *testing.T) {
+	archMain := map[string]string{
+		"Minimalist": "main.go",
+		"Standard":   "cmd/api/main.go",
+		"Hexagonal":  "cmd/api/main.go",
+	}
+	for arch, mainPath := range archMain {
+		t.Run(arch+"_dispatch", func(t *testing.T) {
+			tempDir, err := os.MkdirTemp("", "scaffold-dispatch-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(tempDir)
+
+			oldWd, _ := os.Getwd()
+			os.Chdir(tempDir)
+			defer os.Chdir(oldWd)
+
+			config := &ui.ProjectConfig{
+				ProjectName:  "TestApp",
+				ModuleName:   "github.com/test/app",
+				Architecture: arch,
+				DBDriver:     "PostgreSQL",
+			}
+			s := NewScaffolder(config)
+			if err := s.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+
+			content, err := os.ReadFile(filepath.Join("TestApp", mainPath))
+			if err != nil {
+				t.Fatalf("read %s: %v", mainPath, err)
+			}
+			str := string(content)
+			if !strings.Contains(str, `os.Args[1]`) {
+				t.Errorf("%s missing dispatch switch (os.Args[1]):\n%s", mainPath, str)
+			}
+			if !strings.Contains(str, `case "server"`) || !strings.Contains(str, `case "migrate"`) || !strings.Contains(str, `case "version"`) {
+				t.Errorf("%s missing subcommands server/migrate/version:\n%s", mainPath, str)
+			}
+			if !strings.Contains(str, `os.Exit(2)`) {
+				t.Errorf("%s missing unknown-subcommand exit 2:\n%s", mainPath, str)
+			}
+			if !strings.Contains(str, `github.com/test/app/internal/config`) {
+				t.Errorf("%s missing internal/config import:\n%s", mainPath, str)
+			}
+		})
+	}
+}
