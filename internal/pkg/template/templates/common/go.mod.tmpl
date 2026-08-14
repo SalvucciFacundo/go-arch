@@ -25,3 +25,13 @@ require (
 	github.com/a-h/templ v0.3.906
 )
 {{ end }}
+
+{{ if eq .DBDriver "PostgreSQL" }}
+require (
+	github.com/jackc/pgx/v5 v5.7.1
+)
+{{ else if eq .DBDriver "MySQL" }}
+require (
+	github.com/go-sql-driver/mysql v1.8.1
+)
+{{ end }}
