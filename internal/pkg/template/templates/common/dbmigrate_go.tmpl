@@ -1,0 +1,90 @@
+// Package dbmigrate applies embedded SQL migrations idempotently.
+package dbmigrate
+
+import (
+	"database/sql"
+	"embed"
+	"fmt"
+	"sort"
+)
+
+{{ if eq .DBDriver "PostgreSQL" }}
+_ "github.com/jackc/pgx/v5/stdlib" // postgres driver
+{{ else if eq .DBDriver "MySQL" }}
+_ "github.com/go-sql-driver/mysql" // mysql driver
+{{ end }}
+
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+// Up applies all pending migrations in filename order, each in a transaction.
+func Up(driverName, dsn string) error {
+	db, err := sql.Open(driverName, dsn)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version VARCHAR(255) PRIMARY KEY,
+		applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
+	}
+
+	applied := map[string]bool{}
+	rows, err := db.Query(`SELECT version FROM schema_migrations`)
+	if err != nil {
+		return fmt.Errorf("query schema_migrations: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return err
+		}
+		applied[v] = true
+	}
+
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		return err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		if applied[name] {
+			continue
+		}
+		data, err := migrationsFS.ReadFile("migrations/" + name)
+		if err != nil {
+			return err
+		}
+		if err := applyOne(db, name, data); err != nil {
+			return err
+		}
+		fmt.Printf("applied migration %s\n", name)
+	}
+	return nil
+}
+
+func applyOne(db *sql.DB, name string, data []byte) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(string(data)); err != nil {
+		return fmt.Errorf("apply %s: %w", name, err)
+	}
+	// The pgx stdlib driver accepts ? and translates to $n; MySQL uses ? natively.
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version) VALUES (?)`, name); err != nil {
+		return fmt.Errorf("record %s: %w", name, err)
+	}
+	return tx.Commit()
+}

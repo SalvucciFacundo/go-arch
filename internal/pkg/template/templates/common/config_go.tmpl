@@ -1,0 +1,38 @@
+package config
+
+import (
+	"fmt"
+	"os"
+)
+
+// Config holds runtime configuration read from the environment.
+type Config struct {
+	ServerPort  string
+	AppEnv      string
+	DatabaseURL string
+}
+
+// Load reads configuration from the environment.
+{{ if ne .DBDriver "None" }}
+// It fails fast when DATABASE_URL is missing — copy .env.example to .env first.
+{{ end }}
+func Load() (*Config, error) {
+	cfg := &Config{
+		ServerPort:  envOr("SERVER_PORT", "8080"),
+		AppEnv:      envOr("APP_ENV", "development"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+	}
+{{ if ne .DBDriver "None" }}
+	if cfg.DatabaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL is required (see .env.example)")
+	}
+{{ end }}
+	return cfg, nil
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}

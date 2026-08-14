@@ -1,15 +1,49 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
+
+	"{{ .ModuleName }}/internal/config"
+	{{ if or (eq .DBDriver "PostgreSQL") (eq .DBDriver "MySQL") }}"{{ .ModuleName }}/internal/dbmigrate"{{ end }}
+	{{ if .ScaffoldProdV1 }}
+	"os"
+	{{ end }}
 	{{ if .UseObservability }}
+	"context"
 	"{{ .ModuleName }}/internal/telemetry"
 	{{ end }}
 )
 
+{{ if .ScaffoldProdV1 }}
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "server":
+			runServer()
+			return
+		case "migrate":
+			if err := runMigrate(); err != nil {
+				log.Fatalf("migrate: %v", err)
+			}
+			return
+		case "version":
+			fmt.Println("{{ .ProjectName }} dev")
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "unknown subcommand %q\nusage: %s [server|migrate|version]\n", os.Args[1], os.Args[0])
+			os.Exit(2)
+		}
+	}
+	runServer()
+}
+{{ else }}
+func main() {
+	runServer()
+}
+{{ end }}
+
+func runServer() {
 	fmt.Println("Hello from a Minimalist Go-Arch project!")
 
 	{{ if .UseObservability }}
@@ -21,3 +55,19 @@ func main() {
 	defer shutdown(context.Background())
 	{{ end }}
 }
+
+{{ if .ScaffoldProdV1 }}
+{{ if or (eq .DBDriver "PostgreSQL") (eq .DBDriver "MySQL") }}
+func runMigrate() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return dbmigrate.Up({{ if eq .DBDriver "PostgreSQL" }}"pgx"{{ else }}"mysql"{{ end }}, cfg.DatabaseURL)
+}
+{{ else }}
+func runMigrate() error {
+	return fmt.Errorf("migrations are not supported for this project")
+}
+{{ end }}
+{{ end }}

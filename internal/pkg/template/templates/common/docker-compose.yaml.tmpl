@@ -8,8 +8,18 @@ services:
     environment:
       # Compose-injected values for the API container; override in .env
       SERVER_PORT: ${SERVER_PORT:-8080}
-{{ if ne .DBDriver "None" }}
+{{ if eq .DBDriver "PostgreSQL" }}
       DATABASE_URL: postgres://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/{{ .ProjectName | lower }}
+    depends_on:
+      db:
+        condition: service_healthy
+{{ else if eq .DBDriver "MySQL" }}
+      DATABASE_URL: mysql://${MYSQL_USER:-user}:${MYSQL_PASSWORD:-password}@db:3306/{{ .ProjectName | lower }}
+    depends_on:
+      db:
+        condition: service_healthy
+{{ else if eq .DBDriver "MongoDB" }}
+      DATABASE_URL: mongodb://db:27017/{{ .ProjectName | lower }}
     depends_on:
       db:
         condition: service_healthy
@@ -33,6 +43,8 @@ services:
     image: mysql:8
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_USER: ${MYSQL_USER:-user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
       MYSQL_DATABASE: {{ .ProjectName | lower }}
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
@@ -56,7 +68,13 @@ services:
       - "27017:27017"
     {{ end }}
     volumes:
+    {{ if eq .DBDriver "PostgreSQL" }}
       - db-data:/var/lib/postgresql/data
+    {{ else if eq .DBDriver "MySQL" }}
+      - db-data:/var/lib/mysql
+    {{ else if eq .DBDriver "MongoDB" }}
+      - db-data:/data/db
+    {{ end }}
     restart: unless-stopped
 {{ end }}
 

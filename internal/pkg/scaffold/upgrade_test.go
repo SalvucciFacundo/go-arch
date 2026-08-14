@@ -1945,3 +1945,132 @@ func TestLegacyUpgrade_CreatesRoutesGoWeb(t *testing.T) {
 		t.Error("expected routes.go creation proposed in legacy web upgrade")
 	}
 }
+
+// TestUpgrade_InjectsScaffoldProd verifies marker'd projects with deleted
+// config/dbmigrate packages get them re-injected during upgrade so the
+// re-rendered main compiles. No-marker projects get nothing.
+func TestUpgrade_InjectsScaffoldProd(t *testing.T) {
+	t.Run("marker project injects missing packages", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		oldWd, _ := os.Getwd()
+		if err := os.Chdir(tmpDir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Chdir(oldWd) }()
+
+		// A marker'd project: config/dbmigrate exist, main imports them.
+		if err := os.MkdirAll("internal/config", 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile("internal/config/config.go", []byte("package config\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll("internal/dbmigrate/migrations", 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile("internal/dbmigrate/migrate.go", []byte("package dbmigrate\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile("internal/dbmigrate/migrations/0001_init.sql", []byte("-- x\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(".go-arch", 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Marker in .go-arch.yaml.
+		if err := os.WriteFile(".go-arch.yaml", []byte("project_name: .\nmodule_name: github.com/test/app\narchitecture: Standard\ndb_driver: PostgreSQL\nscaffold_prod_v1: true\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		// Manifest with the packages recorded (main is out of scope for this test).
+		if err := os.WriteFile(".go-arch/manifest.yaml", []byte("files:\n  internal/config/config.go: {sha256: \"\", origin: scaffold, template: common/config_go.tmpl}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := &ui.ProjectConfig{
+			ProjectName:    ".",
+			ModuleName:     "github.com/test/app",
+			Architecture:   "Standard",
+			DBDriver:       "PostgreSQL",
+			ScaffoldProdV1: true,
+		}
+
+		// Delete the packages to simulate drift.
+		if err := os.RemoveAll("internal/config"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.RemoveAll("internal/dbmigrate"); err != nil {
+			t.Fatal(err)
+		}
+
+		plan, err := Upgrade(cfg, WithResolver(DefaultResolver{}))
+		if err != nil {
+			t.Fatalf("Upgrade: %v", err)
+		}
+
+		var injected []string
+		for _, f := range plan.Files {
+			if f.Classification == ClassUpgradable && f.TemplatePath != "" {
+				injected = append(injected, f.Path)
+			}
+		}
+		found := map[string]bool{}
+		for _, p := range injected {
+			found[p] = true
+		}
+		if !found["internal/config/config.go"] {
+			t.Errorf("expected internal/config/config.go injected; got %v", injected)
+		}
+		if !found["internal/dbmigrate/migrate.go"] {
+			t.Errorf("expected internal/dbmigrate/migrate.go injected; got %v", injected)
+		}
+		if !found["internal/dbmigrate/migrations/0001_init.sql"] {
+			t.Errorf("expected migrations/0001_init.sql injected (empty go:embed is a compile error); got %v", injected)
+		}
+
+		// Apply and verify the files exist.
+		if _, err := plan.Apply(); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		for _, p := range []string{"internal/config/config.go", "internal/dbmigrate/migrate.go", "internal/dbmigrate/migrations/0001_init.sql"} {
+			if _, err := os.Stat(p); err != nil {
+				t.Errorf("injected file %s missing after apply: %v", p, err)
+			}
+		}
+	})
+
+	t.Run("no marker gets no injection", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		oldWd, _ := os.Getwd()
+		if err := os.Chdir(tmpDir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Chdir(oldWd) }()
+
+		if err := os.MkdirAll(".go-arch", 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(".go-arch.yaml", []byte("project_name: .\nmodule_name: github.com/test/app\narchitecture: Standard\ndb_driver: None\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(".go-arch/manifest.yaml", []byte("files: {}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := &ui.ProjectConfig{
+			ProjectName:  ".",
+			ModuleName:   "github.com/test/app",
+			Architecture: "Standard",
+			DBDriver:     "None",
+		}
+
+		plan, err := Upgrade(cfg, WithResolver(DefaultResolver{}))
+		if err != nil {
+			t.Fatalf("Upgrade: %v", err)
+		}
+		for _, f := range plan.Files {
+			if f.TemplatePath == "common/config_go.tmpl" || f.TemplatePath == "common/dbmigrate_go.tmpl" {
+				t.Errorf("no-marker project should not inject scaffold-prod packages; got %s", f.Path)
+			}
+		}
+	})
+}

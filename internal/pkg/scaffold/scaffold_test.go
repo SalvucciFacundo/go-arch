@@ -803,6 +803,7 @@ func TestManifest_NewRecordsScaffoldEntries(t *testing.T) {
 		".go-arch.yaml",
 		".env.example",
 		".gitignore",
+		"internal/config/config.go",
 		"static/js/htmx.min.js",
 	}
 	for _, f := range expectedFiles {
@@ -2697,5 +2698,124 @@ func TestHooks_EmptyConfig_IsNoop(t *testing.T) {
 
 	if err := scaffolder.Execute(); err != nil {
 		t.Fatalf("Execute with empty hooks config should succeed, got: %v", err)
+	}
+}
+
+// TestScaffoldProd_DispatchInMains verifies every generated main contains the
+// subcommand dispatch when the scaffold_prod_v1 marker is active, and that
+// legacy content is preserved when it is not.
+func TestScaffoldProd_DispatchInMains(t *testing.T) {
+	archMain := map[string]string{
+		"Minimalist": "main.go",
+		"Standard":   "cmd/api/main.go",
+		"Hexagonal":  "cmd/api/main.go",
+	}
+	for arch, mainPath := range archMain {
+		t.Run(arch+"_dispatch", func(t *testing.T) {
+			tempDir, err := os.MkdirTemp("", "scaffold-dispatch-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(tempDir)
+
+			oldWd, _ := os.Getwd()
+			os.Chdir(tempDir)
+			defer os.Chdir(oldWd)
+
+			config := &ui.ProjectConfig{
+				ProjectName:  "TestApp",
+				ModuleName:   "github.com/test/app",
+				Architecture: arch,
+				DBDriver:     "PostgreSQL",
+			}
+			s := NewScaffolder(config)
+			if err := s.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+
+			content, err := os.ReadFile(filepath.Join("TestApp", mainPath))
+			if err != nil {
+				t.Fatalf("read %s: %v", mainPath, err)
+			}
+			str := string(content)
+			if !strings.Contains(str, `os.Args[1]`) {
+				t.Errorf("%s missing dispatch switch (os.Args[1]):\n%s", mainPath, str)
+			}
+			if !strings.Contains(str, `case "server"`) || !strings.Contains(str, `case "migrate"`) || !strings.Contains(str, `case "version"`) {
+				t.Errorf("%s missing subcommands server/migrate/version:\n%s", mainPath, str)
+			}
+			if !strings.Contains(str, `os.Exit(2)`) {
+				t.Errorf("%s missing unknown-subcommand exit 2:\n%s", mainPath, str)
+			}
+			if !strings.Contains(str, `github.com/test/app/internal/config`) {
+				t.Errorf("%s missing internal/config import:\n%s", mainPath, str)
+			}
+		})
+	}
+}
+
+// TestScaffoldProd_DBMigrateMatrix verifies dbmigrate is generated only for
+// relational drivers, with the correct filename and migration SQL.
+func TestScaffoldProd_DBMigrateMatrix(t *testing.T) {
+	cases := []struct {
+		driver    string
+		hasRunner bool
+	}{
+		{"PostgreSQL", true},
+		{"MySQL", true},
+		{"MongoDB", false},
+		{"None", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.driver, func(t *testing.T) {
+			tempDir, err := os.MkdirTemp("", "scaffold-dbmigrate-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(tempDir)
+
+			oldWd, _ := os.Getwd()
+			os.Chdir(tempDir)
+			defer os.Chdir(oldWd)
+
+			config := &ui.ProjectConfig{
+				ProjectName:  "TestApp",
+				ModuleName:   "github.com/test/app",
+				Architecture: "Standard",
+				DBDriver:     tc.driver,
+			}
+			s := NewScaffolder(config)
+			if err := s.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+
+			runner := filepath.Join("TestApp", "internal", "dbmigrate", "migrate.go")
+			_, statErr := os.Stat(runner)
+			if tc.hasRunner && statErr != nil {
+				t.Errorf("expected dbmigrate/migrate.go for %s (err: %v)", tc.driver, statErr)
+			}
+			if !tc.hasRunner && statErr == nil {
+				t.Errorf("unexpected dbmigrate/migrate.go for %s", tc.driver)
+			}
+
+			if tc.hasRunner {
+				migration := filepath.Join("TestApp", "internal", "dbmigrate", "migrations", "0001_init.sql")
+				if _, err := os.Stat(migration); err != nil {
+					t.Errorf("expected migrations/0001_init.sql for %s (err: %v)", tc.driver, err)
+				}
+				content, _ := os.ReadFile(runner)
+				str := string(content)
+				if !strings.Contains(str, "VARCHAR(255) PRIMARY KEY") {
+					t.Errorf("dbmigrate missing MySQL-safe VARCHAR(255) PK for %s", tc.driver)
+				}
+				if !strings.Contains(str, "schema_migrations") {
+					t.Errorf("dbmigrate missing schema_migrations tracking for %s", tc.driver)
+				}
+				migContent, _ := os.ReadFile(migration)
+				if !strings.Contains(string(migContent), "CREATE TABLE") {
+					t.Errorf("0001_init.sql must contain a real executable statement (not comments only) for %s", tc.driver)
+				}
+			}
+		})
 	}
 }

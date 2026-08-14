@@ -49,6 +49,9 @@ func WithPackInfo(p packs.PackInfo) ScaffoldOption {
 }
 
 func NewScaffolder(config *ui.ProjectConfig, opts ...ScaffoldOption) *Scaffolder {
+	// scaffold-prod v1 is the default for new scaffolds — it drives the
+	// subcommand dispatch + typed config in the generated mains.
+	config.ScaffoldProdV1 = true
 	s := &Scaffolder{config: config}
 
 	// Apply options first so packInfo is known before engine construction.
@@ -356,6 +359,21 @@ func (s *Scaffolder) createCommonFiles() error {
 	}
 	if err := s.createFile(".go-arch.yaml", "common/config.tmpl", nil); err != nil {
 		return err
+	}
+
+	// Typed runtime config (scaffold-prod v1)
+	if err := s.createFile("internal/config/config.go", "common/config_go.tmpl", nil); err != nil {
+		return err
+	}
+
+	// Migrations runner (scaffold-prod v1) — relational drivers only.
+	if s.config.DBDriver == "PostgreSQL" || s.config.DBDriver == "MySQL" {
+		if err := s.createFile("internal/dbmigrate/migrate.go", "common/dbmigrate_go.tmpl", nil); err != nil {
+			return err
+		}
+		if err := s.createFile("internal/dbmigrate/migrations/0001_init.sql", "common/migration_sql.tmpl", nil); err != nil {
+			return err
+		}
 	}
 
 	// .env.example (committed template; real .env is gitignored)

@@ -17,12 +17,14 @@ func TestEngine_Render(t *testing.T) {
 	data := struct {
 		ProjectName      string
 		ModuleName       string
+		DBDriver         string
 		UseObservability bool
 		UseGRPC          bool
 		UseTemplHTMX     bool
 	}{
 		ProjectName:      "TestApp",
 		ModuleName:       "github.com/test/app",
+		DBDriver:         "None",
 		UseObservability: true,
 		UseGRPC:          true,
 		UseTemplHTMX:     false,
@@ -287,4 +289,41 @@ func oopsCode(err error) string {
 		}
 	}
 	return ""
+}
+
+// TestEngine_DeterministicConfig verifies .go-arch.yaml and config.go render
+// byte-identically on repeated renders (no `generated_at: {{ now }}`), so
+// upgrade re-render is stable.
+func TestEngine_DeterministicConfig(t *testing.T) {
+	engine := NewEngine()
+	data := map[string]interface{}{
+		"ProjectName":      "TestApp",
+		"ModuleName":       "github.com/test/app",
+		"Architecture":     "Standard",
+		"DBDriver":         "PostgreSQL",
+		"UseDocker":        true,
+		"UseObservability": false,
+		"UseGRPC":          false,
+		"UseTemplHTMX":     false,
+		"GoArchVersion":    "v2.0.2",
+	}
+
+	for _, tmpl := range []string{"common/config.tmpl", "common/config_go.tmpl"} {
+		var b1, b2 bytes.Buffer
+		if err := engine.RenderTo(&b1, tmpl, data, false); err != nil {
+			t.Fatalf("%s first render: %v", tmpl, err)
+		}
+		if err := engine.RenderTo(&b2, tmpl, data, false); err != nil {
+			t.Fatalf("%s second render: %v", tmpl, err)
+		}
+		if b1.String() != b2.String() {
+			t.Errorf("%s is non-deterministic (re-render differs)", tmpl)
+		}
+		if strings.Contains(b1.String(), "generated_at") {
+			t.Errorf("%s still contains generated_at (non-deterministic)", tmpl)
+		}
+		if tmpl == "common/config.tmpl" && !strings.Contains(b1.String(), "scaffold_prod_v1: true") {
+			t.Errorf("config.tmpl missing scaffold_prod_v1 marker:\n%s", b1.String())
+		}
+	}
 }

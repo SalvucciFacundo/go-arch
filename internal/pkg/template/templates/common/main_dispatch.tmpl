@@ -1,0 +1,21 @@
+func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "server":
+			runServer()
+			return
+		case "migrate":
+			if err := runMigrate(); err != nil {
+				log.Fatalf("migrate: %v", err)
+			}
+			return
+		case "version":
+			fmt.Println("{{ .ProjectName }} dev")
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "unknown subcommand %q\nusage: %s [server|migrate|version]\n", os.Args[1], os.Args[0])
+			os.Exit(2)
+		}
+	}
+	runServer()
+}
